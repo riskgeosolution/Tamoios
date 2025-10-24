@@ -1,0 +1,19 @@
+/* assets/style.css (Estilos dos pinos REMOVIDOS) */
+
+/* ... (Estilos gerais, cards, gauges, badges mantidos) ... */
+body { font-family: 'Roboto', sans-serif; background-color: #f8f9fa; }
+h1, h2, h3, h4, h5, h6 { color: #343a40; margin-bottom: 0.5rem; }
+.map-summary-card { position: absolute; z-index: 1000; background-color: rgba(255, 255, 255, 0.9); border-radius: 0.5rem; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); width: 250px; padding: 0.5rem; max-height: calc(80vh - 4rem); overflow-y: auto; }
+.map-summary-left { top: 1rem; left: 1rem; }
+.map-summary-right { top: 1rem; right: 1rem; }
+.km-summary-block { border: 1px solid #dee2e6; border-radius: 0.3rem; padding: 0.5rem; margin-bottom: 0.75rem; background-color: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); }
+.km-summary-block:last-child { margin-bottom: 0; }
+.gauge-vertical-container { position: relative; width: 60px; height: 100px; background-color: #e9ecef; border-radius: 0.25rem; overflow: hidden; margin: 0 auto; display: flex; align-items: flex-end; }
+.gauge-bar { width: 100%; transition: height 0.5s ease-out; }
+.gauge-label { position: absolute; width: 100%; top: 50%; left: 0; transform: translateY(-50%); text-align: center; font-weight: bold; color: #000; pointer-events: none; }
+.bg-warning { background-color: #ffc107 !important; }
+.bg-orange { background-color: #fd7e14 !important; }
+.badge-orange { color: #fff; background-color: #fd7e14 !important; }
+.badge-black-text { color: #000 !important; font-weight: bold; }
+
+/* --- Bloco de estilo dos pinos coloridos foi REMOVIDO daqui --- */

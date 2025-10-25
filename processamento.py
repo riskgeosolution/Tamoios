@@ -1,4 +1,4 @@
-# processamento.py (CORRIGIDO - Garante mapeamento correto)
+# processamento.py (CORRIGIDO - Lógica Exata do Fluxograma)
 
 import pandas as pd
 import datetime
@@ -10,28 +10,23 @@ CHUVA_LIMITE_LARANJA = 89.0
 
 # --- Constantes para a Umidade ---
 TOLERANCIA_SECO = 0.1
-DELTA_TRIGGER_UMIDADE = 5.0
+DELTA_TRIGGER_UMIDADE = 5.0  # Gatilho de 5% acima da base para "SIM"
 
 # Mapeamento de Risco (Usado internamente aqui)
 RISCO_MAP = {"LIVRE": 0, "ATENÇÃO": 1, "ALERTA": 2, "PARALIZAÇÃO": 3, "SEM DADOS": -1}
 
-# --- INÍCIO DA CORREÇÃO: Mapeamento de Status ---
-# Garante que os nomes de status padrão correspondam aos riscos corretos
+# Mapeamento para os nomes padrão
 STATUS_MAP_HIERARQUICO = {
     3: ("PARALIZAÇÃO", "danger", "bg-danger"),  # Risco 3 (Vermelho)
     2: ("ALERTA", "orange", "bg-orange"),  # Risco 2 (Laranja)
-    1: ("ATENÇÃO", "warning", "bg-warning"),  # Risco 1 (Amarelo/Ouro - CSS define .bg-warning)
+    1: ("ATENÇÃO", "warning", "bg-warning"),  # Risco 1 (Amarelo)
     0: ("LIVRE", "success", "bg-success"),  # Risco 0 (Verde)
     -1: ("SEM DADOS", "secondary", "bg-secondary")  # Risco -1
 }
 STATUS_MAP_FLUXOGRAMA = STATUS_MAP_HIERARQUICO  # Alias
 
 
-# --- FIM DA CORREÇÃO ---
-
-
 # --- FUNÇÃO calcular_acumulado_72h (Mantida) ---
-# ... (código mantido) ...
 def calcular_acumulado_72h(df_ponto):
     if 'chuva_mm' not in df_ponto.columns or df_ponto.empty or 'timestamp' not in df_ponto.columns:
         return pd.DataFrame(columns=['timestamp', 'chuva_mm'])
@@ -48,7 +43,6 @@ def calcular_acumulado_72h(df_ponto):
 
 # --- FUNÇÃO definir_status_chuva (Mantida) ---
 def definir_status_chuva(chuva_mm):
-    # ... (código mantido) ...
     STATUS_MAP_CHUVA = {"LIVRE": "success", "ATENÇÃO": "warning", "ALERTA": "orange", "PARALIZAÇÃO": "danger",
                         "SEM DADOS": "secondary", "INDEFINIDO": "secondary"}
     try:
@@ -68,31 +62,53 @@ def definir_status_chuva(chuva_mm):
         return "INDEFINIDO", "secondary"
 
 
-# --- FUNÇÃO definir_status_umidade_hierarquico (Lógica do Fluxograma, Mantida) ---
+# --- FUNÇÃO definir_status_umidade_hierarquico (REESCRITA - Lógica Exata do Fluxograma) ---
 def definir_status_umidade_hierarquico(umidade_1m, umidade_2m, umidade_3m,
                                        base_1m, base_2m, base_3m,
                                        chuva_acumulada_72h=0.0):
-    # ... (código mantido) ...
+    """
+    Define o status/cor de alerta com base nas combinações EXATAS do fluxograma.
+    Retorna (texto_status_padrão, cor_badge_bootstrap, cor_barra_css).
+    """
     try:
         if pd.isna(umidade_1m) or pd.isna(umidade_2m) or pd.isna(umidade_3m):
-            return STATUS_MAP_HIERARQUICO[-1]
+            return STATUS_MAP_HIERARQUICO[-1]  # Sem dados
+
+        # Verificar "Atingimento dos limiares" (SIM = True, NÃO = False)
         s1_sim = (umidade_1m - base_1m) >= DELTA_TRIGGER_UMIDADE
         s2_sim = (umidade_2m - base_2m) >= DELTA_TRIGGER_UMIDADE
         s3_sim = (umidade_3m - base_3m) >= DELTA_TRIGGER_UMIDADE
-        risco_final = 0
+
+        risco_final = 0  # Default é LIVRE (Verde)
+
+        # --- INÍCIO DA CORREÇÃO (Lógica Exata do Fluxograma) ---
+
+        # Condição PARALIZAÇÃO (Vermelho)
         if s1_sim and s2_sim and s3_sim:
             risco_final = 3
-        elif (s1_sim and s2_sim and not s3_sim) or (not s1_sim and not s2_sim and s3_sim):
+
+        # Condições ALERTA (Laranja)
+        elif (s1_sim and s2_sim and not s3_sim) or \
+                (not s1_sim and s2_sim and s3_sim):  # (N, S, S) <-- Regra de descida
             risco_final = 2
-        elif (s1_sim and not s2_sim and not s3_sim) or (not s1_sim and s2_sim and s3_sim):
+
+        # Condições ATENÇÃO (Amarelo)
+        elif (s1_sim and not s2_sim and not s3_sim) or \
+                (not s1_sim and not s2_sim and s3_sim):  # (N, N, S) <-- Regra de descida
             risco_final = 1
+
+        # --- FIM DA CORREÇÃO ---
+
+        # Se nenhuma condição acima for atendida (ex: N, N, N ou N, S, N), risco_final permanece 0 (LIVRE)
+
         return STATUS_MAP_HIERARQUICO[risco_final]
+
     except Exception as e:
         print(f"Erro ao definir status de umidade (fluxograma): {e}")
         return STATUS_MAP_HIERARQUICO[-1]
 
 
-# --- FUNÇÃO definir_status_umidade_individual (CORRIGIDA) ---
+# --- FUNÇÃO definir_status_umidade_individual (Mantida) ---
 def definir_status_umidade_individual(umidade_atual, umidade_base, risco_nivel):
     """
     Define a cor CSS para um ÚNICO sensor.
@@ -105,7 +121,6 @@ def definir_status_umidade_individual(umidade_atual, umidade_base, risco_nivel):
 
         if (umidade_atual - umidade_base) >= DELTA_TRIGGER_UMIDADE:
             # Se o delta é >= 5%, o sensor está "ativo".
-            # --- INÍCIO DA CORREÇÃO: Mapeia Risco para Cor CSS ---
             if risco_nivel == 1:
                 return "#FFD700"  # Amarelo/Ouro (Atenção)
             elif risco_nivel == 2:
@@ -114,7 +129,6 @@ def definir_status_umidade_individual(umidade_atual, umidade_base, risco_nivel):
                 return "#dc3545"  # Vermelho (Paralisação)
             else:
                 return "#FFD700"  # Default para Amarelo se ativo
-            # --- FIM DA CORREÇÃO ---
         else:
             # Se está abaixo do gatilho, está "Livre"
             return "green"  # Verde/Livre

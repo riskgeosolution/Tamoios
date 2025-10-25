@@ -1,4 +1,4 @@
-# pages/specific_dash.py (CORRIGIDO - Umidade Lado a Lado com Fonte Maior)
+# pages/specific_dash.py (CORRIGIDO - Legenda do PDF na parte superior)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -32,9 +32,9 @@ CORES_UMIDADE = {'umidade_1m_perc': CORES_ALERTAS_CSS["verde"],
 RISCO = {"LIVRE": 0, "ATENÇÃO": 1, "ALERTA": 2, "PARALIZAÇÃO": 3, "SEM DADOS": -1, "INDEFINIDO": -1}
 mapa_status_cor_geral = {
     0: ("LIVRE", "success"),
-    1: ("ATENÇÃO", "warning"),  # Risco 1 = Amarelo/Warning
-    2: ("ALERTA", "orange"),  # Risco 2 = Laranja/Orange
-    3: ("PARALIZAÇÃO", "danger"),  # Risco 3 = Vermelho/Danger
+    1: ("ATENÇÃO", "warning"),
+    2: ("ALERTA", "orange"),
+    3: ("PARALIZAÇÃO", "danger"),
     -1: ("SEM DADOS", "secondary")
 }
 
@@ -43,29 +43,36 @@ mapa_status_cor_geral = {
 def get_layout():
     opcoes_tempo = [{'label': f'Últimas {h} horas', 'value': h} for h in [1, 3, 6, 12, 18, 24, 72, 84, 96]] + [
         {'label': 'Todo o Histórico', 'value': 14 * 24}]
+
     return dbc.Container([
         dcc.Store(id='store-id-ponto-ativo'),
+
         dbc.Row(id='specific-dash-cards', children=[dbc.Spinner(size="lg")]),
+
         dbc.Row([dbc.Col(dbc.Label("Período (Gráficos):"), width="auto"), dbc.Col(
             dcc.Dropdown(id='graph-time-selector', options=opcoes_tempo, value=72, clearable=False, searchable=False),
             width=12, lg=4)], align="center", className="my-3"),
+
         dbc.Row(id='specific-dash-graphs', children=[dbc.Spinner(size="lg")], className="my-4"),
-        dbc.Row([dbc.Col(dbc.Card(dbc.CardBody([html.H4("Gerar Relatório em PDF", className="card-title"),
-                                                html.P("Este relatório será gerado para o ponto atual."),
-                                                dcc.DatePickerRange(id='pdf-date-picker', start_date=(
-                                                        pd.Timestamp.now() - pd.Timedelta(days=7)).date(),
-                                                                    end_date=pd.Timestamp.now().date(),
-                                                                    display_format='DD/MM/YYYY', className="mb-3"),
-                                                html.Br(), dcc.Loading(id="loading-pdf", type="default", children=[
+
+        dbc.Row([dbc.Col(dbc.Card(dbc.CardBody([
+            # Textos removidos
+            dcc.DatePickerRange(id='pdf-date-picker', start_date=(
+                    pd.Timestamp.now() - pd.Timedelta(days=7)).date(),
+                                end_date=pd.Timestamp.now().date(),
+                                display_format='DD/MM/YYYY', className="mb-3"),
+            html.Br(),
+            dcc.Loading(id="loading-pdf", type="default", children=[
                 html.Div([dbc.Button("Gerar e Baixar PDF", id='btn-pdf-especifico', color="primary", size="lg"),
-                          dcc.Download(id='download-pdf-especifico')])])]), className="shadow-sm text-center"),
-                         className="mb-5")]),
+                          dcc.Download(id='download-pdf-especifico')])])
+        ]), className="shadow-sm text-center"),
+            className="mb-5")]),
     ], fluid=True)
 
 
 # --- Callbacks da Página Específica ---
 
-# Callback 1: Atualiza o dashboard (MODIFICADO - Card Umidade)
+# Callback 1: Atualiza o dashboard (Mantido)
 @app.callback(
     [
         Output('specific-dash-cards', 'children'),
@@ -79,6 +86,7 @@ def get_layout():
     ]
 )
 def update_specific_dashboard(pathname, dados_json, selected_hours):
+    # ... (código mantido idêntico) ...
     if not dados_json or not pathname.startswith('/ponto/') or selected_hours is None:
         return dash.no_update, dash.no_update, dash.no_update
     id_ponto = "";
@@ -110,21 +118,16 @@ def update_specific_dashboard(pathname, dados_json, selected_hours):
         if pd.isna(umidade_3m_atual): umidade_3m_atual = base_3m
     except IndexError:
         return "Dados insuficientes.", "", id_ponto
-
     status_chuva_txt, status_chuva_col = processamento.definir_status_chuva(ultima_chuva_72h)
     risco_chuva = RISCO.get(status_chuva_txt, -1)
-
     status_umid_txt, status_umid_col_bootstrap, _ = processamento.definir_status_umidade_hierarquico(
         umidade_1m_atual, umidade_2m_atual, umidade_3m_atual, base_1m, base_2m, base_3m
     )
     risco_umidade = RISCO.get(status_umid_txt, -1)
-
     risco_geral = max(risco_chuva, risco_umidade)
-
     status_geral_texto, status_geral_cor_bootstrap = mapa_status_cor_geral.get(risco_geral, ("INDEFINIDO", "secondary"))
     if risco_umidade > risco_chuva and risco_umidade > 0:
         status_geral_texto, status_geral_cor_bootstrap, _ = processamento.STATUS_MAP_HIERARQUICO[risco_umidade]
-
     css_color_s1 = CORES_ALERTAS_CSS["amarelo"] if (
                                                                umidade_1m_atual - base_1m) >= processamento.DELTA_TRIGGER_UMIDADE else \
     CORES_ALERTAS_CSS["verde"]
@@ -134,60 +137,52 @@ def update_specific_dashboard(pathname, dados_json, selected_hours):
     css_color_s3 = CORES_ALERTAS_CSS["vermelho"] if (
                                                                 umidade_3m_atual - base_3m) >= processamento.DELTA_TRIGGER_UMIDADE else \
     CORES_ALERTAS_CSS["verde"]
-
-    # --- INÍCIO DA CORREÇÃO: Layout do Card de Umidade (De volta ao horizontal, fonte maior) ---
     layout_cards = [
-        # Card Status Atual (Mantido)
         dbc.Col(dbc.Card(dbc.CardBody([html.H5("Status Atual"), html.P(status_geral_texto, className="fs-3 fw-bold")]),
                          color=status_geral_cor_bootstrap,
                          inverse=(status_geral_cor_bootstrap not in ["warning", "secondary", "light", "success"]),
-                         className="shadow"), xs=12, md=4, className="mb-4"),
-        # Card Chuva (Mantido)
+                         className="shadow h-100"), xs=12, md=4, className="mb-4"),
         dbc.Col(dbc.Card(
             dbc.CardBody([html.H5("Chuva 72h"), html.P(f"{ultima_chuva_72h:.1f} mm", className="fs-3 fw-bold")]),
-            className="shadow"), xs=12, md=4, className="mb-4"),
-
-        # Card de Umidade (Horizontal com fonte maior - fs-3 para combinar com chuva)
+            className="shadow h-100"), xs=12, md=4, className="mb-4"),
         dbc.Col(dbc.Card(
             dbc.CardBody([
-                html.H5("Umidade (%)", className="mb-3"),  # Título da umidade
+                html.H5("Umidade (%)", className="mb-3"),
                 dbc.Row([
                     dbc.Col(
                         html.P([
-                            html.Span(f"{umidade_1m_atual:.1f}", className="fw-bold", style={'color': css_color_s1}),
+                            html.Span(f"{umidade_1m_atual:.1f}", className="fs-3 fw-bold",
+                                      style={'color': css_color_s1}),
                             html.Span(" (1m)", className="small", style={'color': css_color_s1})
-                        ], className="fs-3 mb-0"),  # fs-3 para combinar com o tamanho da chuva
-                        width="auto"
+                        ], className="mb-0 text-center"),
+                        width=4
                     ),
                     dbc.Col(
                         html.P([
-                            html.Span(f"{umidade_2m_atual:.1f}", className="fw-bold", style={'color': css_color_s2}),
+                            html.Span(f"{umidade_2m_atual:.1f}", className="fs-3 fw-bold",
+                                      style={'color': css_color_s2}),
                             html.Span(" (2m)", className="small", style={'color': css_color_s2})
-                        ], className="fs-3 mb-0"),  # fs-3
-                        width="auto"
+                        ], className="mb-0 text-center"),
+                        width=4
                     ),
                     dbc.Col(
                         html.P([
-                            html.Span(f"{umidade_3m_atual:.1f}", className="fw-bold", style={'color': css_color_s3}),
+                            html.Span(f"{umidade_3m_atual:.1f}", className="fs-3 fw-bold",
+                                      style={'color': css_color_s3}),
                             html.Span(" (3m)", className="small", style={'color': css_color_s3})
-                        ], className="fs-3 mb-0"),  # fs-3
-                        width="auto"
+                        ], className="mb-0 text-center"),
+                        width=4
                     ),
-                ], justify="around")  # Usa justify="around" para espaçar uniformemente
+                ], justify="around")
             ]),
-            className="shadow"), xs=12, md=4, className="mb-4"),
+            className="shadow h-100"), xs=12, md=4, className="mb-4"),
     ]
-    # --- FIM DA CORREÇÃO ---
-
-    # Filtra dados para gráficos
     PONTOS_POR_HORA = int(60 / (FREQUENCIA_SIMULACAO.total_seconds() / 60))
     n_pontos_desejados = selected_hours * PONTOS_POR_HORA
     n_pontos_plot = min(n_pontos_desejados, len(df_ponto))
     df_ponto_plot = df_ponto.tail(n_pontos_plot);
     df_chuva_72h_plot = df_chuva_72h.tail(n_pontos_plot)
     n_horas_titulo = selected_hours
-
-    # Gráfico de Chuva (Mantido)
     fig_chuva = make_subplots(specs=[[{"secondary_y": True}]])
     fig_chuva.add_trace(
         go.Bar(x=df_ponto_plot['timestamp'], y=df_ponto_plot['chuva_mm'], name='Pluviometria Horária (mm)',
@@ -202,8 +197,6 @@ def update_specific_dashboard(pathname, dados_json, selected_hours):
                             yaxis2_title="Precipitação Acumulada (mm)", hovermode="x unified", bargap=0.1)
     fig_chuva.update_yaxes(title_text="Pluviometria Horária (mm)", secondary_y=False);
     fig_chuva.update_yaxes(title_text="Precipitação Acumulada (mm)", secondary_y=True)
-
-    # Gráfico de Umidade (Mantido)
     df_umidade = df_ponto_plot.melt(id_vars=['timestamp'],
                                     value_vars=['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'],
                                     var_name='Sensor', value_name='Umidade (%)')
@@ -212,16 +205,14 @@ def update_specific_dashboard(pathname, dados_json, selected_hours):
     fig_umidade.update_traces(line=dict(width=3));
     fig_umidade.update_layout(template=TEMPLATE_GRAFICO_MODERNO, margin=dict(l=40, r=20, t=40, b=50),
                               legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
-
     layout_graficos = [
         dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_chuva)), className="shadow-sm"), width=12, className="mb-4"),
         dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_umidade)), className="shadow-sm"), width=12,
                 className="mb-4"), ]
-
     return layout_cards, layout_graficos, id_ponto
 
 
-# Callback 2: Gerar o PDF (Mantido Idêntico)
+# Callback 2: Gerar o PDF (MODIFICADO - Legenda e Margem)
 @app.callback(
     Output('download-pdf-especifico', 'data'),
     Input('btn-pdf-especifico', 'n_clicks'),
@@ -230,6 +221,8 @@ def update_specific_dashboard(pathname, dados_json, selected_hours):
 )
 def gerar_download_pdf_especifico(n_clicks, start_date_str, end_date_str, id_ponto, dados_json):
     if not n_clicks or not id_ponto or not dados_json: return dash.no_update
+
+    # ... (código de setup e leitura de dados mantido) ...
     try:
         config = PONTOS_DE_ANALISE[id_ponto]
     except KeyError:
@@ -274,6 +267,8 @@ def gerar_download_pdf_especifico(n_clicks, start_date_str, end_date_str, id_pon
                                                                              ("INDEFINIDO", "secondary"))
     if risco_umidade_pdf > 0 and risco_umidade_pdf >= risco_chuva_pdf:
         status_geral_pdf_texto, status_geral_pdf_cor, _ = processamento.STATUS_MAP_HIERARQUICO[risco_umidade_pdf]
+
+    # Cria figuras para PDF
     df_periodo_plot = df_periodo.copy();
     df_chuva_72h_plot = df_chuva_72h_pdf.copy()
     formato_data_pdf = '%d/%m/%y %Hh';
@@ -292,15 +287,27 @@ def gerar_download_pdf_especifico(n_clicks, start_date_str, end_date_str, id_pon
     fig_umidade_pdf = px.line(df_umidade_pdf_melted, x='timestamp_str', y='Umidade (%)', color='Sensor',
                               title="Umidade do Solo - Período Selecionado", color_discrete_map=CORES_UMIDADE)
     fig_umidade_pdf.update_traces(line=dict(width=3))
+
+    # --- INÍCIO DA ALTERAÇÃO: Legenda e Margem do PDF ---
     fig_chuva_pdf.update_layout(title_text="Pluviometria - Período Selecionado", template=TEMPLATE_GRAFICO_MODERNO,
-                                legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
+                                legend=dict(orientation="h",
+                                            yanchor="bottom", y=1.02,  # Posição acima do título
+                                            xanchor="center", x=0.5),
                                 yaxis_title="Pluv. Horária (mm)", yaxis2_title="Acumulada (mm)", xaxis_title=None,
-                                xaxis_tickangle=-45, margin=dict(b=80))
+                                xaxis_tickangle=-45,
+                                margin=dict(b=80, t=80))  # Aumenta margem superior (t) e mantém inferior (b)
     fig_chuva_pdf.update_yaxes(title_text="Pluv. Horária (mm)", secondary_y=False);
     fig_chuva_pdf.update_yaxes(title_text="Acumulada (mm)", secondary_y=True)
+
     fig_umidade_pdf.update_layout(template=TEMPLATE_GRAFICO_MODERNO,
-                                  legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
-                                  xaxis_title=None, xaxis_tickangle=-45, margin=dict(b=80))
+                                  legend=dict(orientation="h",
+                                              yanchor="bottom", y=1.02,  # Posição acima do título
+                                              xanchor="center", x=0.5),
+                                  xaxis_title=None, xaxis_tickangle=-45,
+                                  margin=dict(b=80, t=80))  # Aumenta margem superior (t) e mantém inferior (b)
+    # --- FIM DA ALTERAÇÃO ---
+
+    # Geração do PDF
     pdf_bytes = gerador_pdf.criar_relatorio_em_memoria(df_periodo, fig_chuva_pdf, fig_umidade_pdf,
                                                        status_geral_pdf_texto, status_geral_pdf_cor)
     pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')

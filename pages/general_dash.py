@@ -1,4 +1,4 @@
-# pages/general_dash.py (CORRIGIDO - Seletor de Período REINSERIDO)
+# pages/general_dash.py (CORRIGIDO - Legendas simplificadas)
 
 import dash
 from dash import html, dcc, callback, Input, Output
@@ -11,30 +11,27 @@ from plotly.subplots import make_subplots
 
 # Importa o app central e helpers
 from app import app, TEMPLATE_GRAFICO_MODERNO
-from data_source import PONTOS_DE_ANALISE, FREQUENCIA_SIMULACAO  # Importa a frequência
+from data_source import PONTOS_DE_ANALISE, FREQUENCIA_SIMULACAO
 import processamento
 
-# --- Mapa de Cores para Umidade ---
+# --- INÍCIO DA ALTERAÇÃO 1: Atualizar Mapa de Cores ---
 CORES_UMIDADE = {
-    'umidade_1m_perc': 'green',
-    'umidade_2m_perc': 'gold',
-    'umidade_3m_perc': 'red'
+    '1m': 'green',
+    '2m': '#FFD700',  # Amarelo Ouro
+    '3m': 'red'
 }
 
+
+# --- FIM DA ALTERAÇÃO 1 ---
 
 # --- Layout da Página Geral ---
 def get_layout():
     """Retorna o layout do dashboard geral."""
-    # --- INÍCIO DA ALTERAÇÃO ---
-    # Readiciona o seletor de tempo
     opcoes_tempo = [{'label': f'Últimas {h} horas', 'value': h} for h in [1, 3, 6, 12, 18, 24, 72, 84, 96]] + [
         {'label': 'Todo o Histórico', 'value': 14 * 24}]
 
     return dbc.Container([
-        # Linha Título/Botão (Continua Removida)
-        # dbc.Row([...])
-
-        # Readiciona a linha do Dropdown
+        # Seletor de Período
         dbc.Row([
             dbc.Col(dbc.Label("Período (Gráficos):"), width="auto"),
             dbc.Col(
@@ -47,26 +44,20 @@ def get_layout():
                 ),
                 width=12, lg=4
             )
-        ], align="center", className="my-3"),  # my-3 adiciona margem
+        ], align="center", className="my-3"),
 
         # Conteúdo dos gráficos
         html.Div(id='general-dash-content', children=[dbc.Spinner(size="lg", children="Carregando...")])
     ], fluid=True)
-    # --- FIM DA ALTERAÇÃO ---
 
 
 # --- Callback da Página Geral ---
 @app.callback(
     Output('general-dash-content', 'children'),
     Input('store-dados-sessao', 'data'),
-    # --- INÍCIO DA ALTERAÇÃO ---
-    Input('general-graph-time-selector', 'value')  # Readiciona o Input
-    # --- FIM DA ALTERAÇÃO ---
+    Input('general-graph-time-selector', 'value')
 )
-def update_general_dashboard(dados_json, selected_hours):  # <-- Readiciona selected_hours
-
-    # --- (Lógica do callback mantida idêntica à original) ---
-
+def update_general_dashboard(dados_json, selected_hours):
     if not dados_json or selected_hours is None:
         return dbc.Spinner(size="lg", children="Carregando dados...")
     try:
@@ -89,7 +80,8 @@ def update_general_dashboard(dados_json, selected_hours):  # <-- Readiciona sele
         df_chuva_72h_plot = df_chuva_72h_completo.tail(n_pontos_plot)
         n_horas_titulo = selected_hours
 
-        # Gráfico de Chuva (Eixos Originais)
+        # Gráfico de Chuva (Mantido)
+        # ... (código mantido) ...
         fig_chuva = make_subplots(specs=[[{"secondary_y": True}]])
         fig_chuva.add_trace(go.Bar(x=df_ponto_plot['timestamp'], y=df_ponto_plot['chuva_mm'], name='Pluv. Horária',
                                    marker_color='#2C3E50', opacity=0.8), secondary_y=False)
@@ -111,9 +103,17 @@ def update_general_dashboard(dados_json, selected_hours):  # <-- Readiciona sele
                                         value_vars=['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'],
                                         var_name='Sensor', value_name='Umidade (%)')
 
+        # --- INÍCIO DA ALTERAÇÃO 2: Renomear sensores ---
+        df_umidade['Sensor'] = df_umidade['Sensor'].replace({
+            'umidade_1m_perc': '1m',
+            'umidade_2m_perc': '2m',
+            'umidade_3m_perc': '3m'
+        })
+        # --- FIM DA ALTERAÇÃO 2 ---
+
         fig_umidade = px.line(df_umidade, x='timestamp', y='Umidade (%)', color='Sensor',
                               title=f"Umidade - {config['nome']} ({n_horas_titulo}h)",
-                              color_discrete_map=CORES_UMIDADE)
+                              color_discrete_map=CORES_UMIDADE)  # Usa novo mapa de cores
         fig_umidade.update_traces(line=dict(width=3))
         fig_umidade.update_layout(template=TEMPLATE_GRAFICO_MODERNO, margin=dict(l=40, r=20, t=40, b=50),
                                   legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))

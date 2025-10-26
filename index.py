@@ -1,4 +1,4 @@
-# index.py (CORRIGIDO - storage_type='memory' para o Render)
+# index.py (CORRIGIDO - Removido o dcc.Interval para permitir o "sleep" no Render)
 
 import dash
 from dash import html, dcc
@@ -52,15 +52,17 @@ mapa_status_cor_geral = {0: ("LIVRE", "success"), 1: ("ATENÇÃO", "warning"), 2
 # Variável Global para rastrear o ESTADO DE CHUVA (para evitar race condition)
 ESTADO_ALERTA_SERVIDOR = {}
 
-# --- INÍCIO DA ALTERAÇÃO (Render) ---
+# --- INÍCIO DA ALTERAÇÃO (Remoção do Intervalo) ---
 app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
 
-    # Alterado de 'session' para 'memory' para evitar consumo excessivo de bandwidth
+    # Mantido 'memory' para evitar consumo de bandwidth
     dcc.Store(id='store-dados-sessao', storage_type='memory'),
     dcc.Store(id='store-ultimo-status', storage_type='memory'),  # Agora armazena o status da CHUVA
 
-    dcc.Interval(id='intervalo-atualizacao', interval=2 * 1000, n_intervals=0),
+    # O dcc.Interval foi REMOVIDO para permitir que o Render "durma"
+    # dcc.Interval(id='intervalo-atualizacao', interval=2 * 1000, n_intervals=0),
+
     get_navbar(),
     html.Div(id='page-content')
 ])
@@ -82,24 +84,28 @@ def display_page(pathname):
         return map_view.get_layout()
 
 
-# Callback 2: Atualização de Dados (Background) (Mantido)
-@app.callback(Output('store-dados-sessao', 'data'), Input('intervalo-atualizacao', 'n_intervals'))
-def carregar_dados_em_background(n_intervals):
+# Callback 2: Atualização de Dados (Background) - MODIFICADO
+@app.callback(
+    Output('store-dados-sessao', 'data'),
+    Input('url', 'pathname')  # MUDANÇA: Acionado 1 vez no carregamento da página
+)
+def carregar_dados_em_background(pathname):
     import data_source
-    print(f"Atualização background (Intervalo {n_intervals}): Buscando dados...")
+    # Esta função agora só roda UMA VEZ quando a página é aberta.
+    print(f"Carregamento inicial de dados (Trigger: {pathname}): Buscando dados...")
     df = data_source.get_data();
-    # Como o store agora é 'memory', este return é lido por outros callbacks
-    # no mesmo servidor, sem enviar o JSON para o navegador.
     return df.to_json(date_format='iso', orient='split')
 
 
 # Callback 3: Verificação de Alertas (Background) - (Baseado na CHUVA)
 @app.callback(
     Output('store-ultimo-status', 'data'),  # Agora salva o status da CHUVA
-    Input('store-dados-sessao', 'data'),
+    Input('store-dados-sessao', 'data'),  # Acionado após o Callback 2
     State('store-ultimo-status', 'data')  # Usado para inicializar a variável global
 )
 def verificar_alertas_em_background(dados_json, status_antigo_json_store):
+    # Esta função agora só roda UMA VEZ, após o carregamento dos dados.
+
     global ESTADO_ALERTA_SERVIDOR
 
     if not dados_json:
@@ -120,18 +126,13 @@ def verificar_alertas_em_background(dados_json, status_antigo_json_store):
         except Exception:
             ESTADO_ALERTA_SERVIDOR = {}
 
-    # Este dicionário será retornado para ATUALIZAR o dcc.Store
     status_novos_para_store = {}
 
     # 1. Loop para verificar status individual
     for id_ponto, config in PONTOS_DE_ANALISE.items():
 
-        # Lemos o status de CHUVA anterior da nossa variável global instantânea
         status_chuva_antigo_ponto = ESTADO_ALERTA_SERVIDOR.get(id_ponto, "INDEFINIDO")
-
         df_ponto = df_completo[df_completo['id_ponto'] == id_ponto]
-
-        # Calcular APENAS o status da CHUVA
         status_chuva_txt = "SEM DADOS"
 
         if not df_ponto.empty:
@@ -139,56 +140,38 @@ def verificar_alertas_em_background(dados_json, status_antigo_json_store):
                 df_chuva_72h = processamento.calcular_acumulado_72h(df_ponto)
                 ultima_chuva_72h = df_chuva_72h.iloc[-1]['chuva_mm'] if not df_chuva_72h.empty and not pd.isna(
                     df_chuva_72h.iloc[-1]['chuva_mm']) else None
-
-                # Este é o status que vamos rastrear
                 status_chuva_txt, _ = processamento.definir_status_chuva(ultima_chuva_72h)
-
             except Exception as e_calc:
                 print(f"Erro cálculo alerta para {id_ponto}: {e_calc}");
                 status_chuva_txt = "ERRO"
 
-        # Lógica de Alerta (Baseada APENAS na CHUVA)
-
-        # A transição real é quando o status de CHUVA calculado é diferente do status de CHUVA salvo.
         if status_chuva_txt != status_chuva_antigo_ponto:
-
             print(f"ALERTA (CHUVA): Ponto {id_ponto} mudou de {status_chuva_antigo_ponto} -> {status_chuva_txt}")
-
-            # ATUALIZA o estado de CHUVA na variável global IMEDIATAMENTE.
             ESTADO_ALERTA_SERVIDOR[id_ponto] = status_chuva_txt
-
             deve_enviar = False
 
-            # REGRA 1: ALERTA -> PARALIZAÇÃO (Crítico)
             if status_chuva_txt == "PARALIZAÇÃO" and status_chuva_antigo_ponto == "ALERTA":
                 deve_enviar = True
                 print(">>> Transição CRÍTICA (CHUVA: ALERTA->PARALIZAÇÃO) detectada. Disparando alarme.")
-
-            # REGRA 2: ATENÇÃO -> LIVRE (Retorno à Normalidade)
             elif status_chuva_txt == "LIVRE" and status_chuva_antigo_ponto == "ATENÇÃO":
                 deve_enviar = True
                 print(">>> Transição de NORMALIZAÇÃO (CHUVA: ATENÇÃO->LIVRE) detectada. Disparando alarme.")
 
             if deve_enviar:
-                # TENTA ENVIAR O ALERTA (Chama o alertas.py)
                 try:
                     alertas.enviar_alerta(
                         id_ponto,
                         config.get('nome', id_ponto),
-                        status_chuva_txt,  # Novo Status (Chuva)
-                        status_chuva_antigo_ponto  # Status Anterior (Chuva)
+                        status_chuva_txt,
+                        status_chuva_antigo_ponto
                     )
                 except Exception as e:
                     print(f"AVISO: Falha na notificação para {id_ponto}. Erro: {e}")
 
-            # Salva o novo status (de chuva) para o dcc.Store (para persistência)
             status_novos_para_store[id_ponto] = status_chuva_txt
-
         else:
-            # Se não houve mudança, apenas registra o status atual (MANTIDO)
             status_novos_para_store[id_ponto] = status_chuva_antigo_ponto
 
-    # Salva o dicionário de status (de CHUVA) no dcc.Store
     return json.dumps(status_novos_para_store)
 
 

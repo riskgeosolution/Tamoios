@@ -1,4 +1,4 @@
-# pages/map_view.py (CORRIGIDO - Gauge de Umidade com Níveis Fixos)
+# pages/map_view.py (ZOOM ALTERADO PARA 13 - Foco Intermediário)
 
 import dash
 from dash import html, dcc, callback, Input, Output
@@ -26,7 +26,8 @@ def get_layout():
             dbc.Row([dbc.Col(
                 html.Div([
                     dl.Map(
-                        id='mapa-principal', center=[-23.5951, -45.4438], zoom=14,
+                        # Zoom alterado de 12 para 13 (nível intermediário)
+                        id='mapa-principal', center=[-23.5951, -45.4438], zoom=13,
                         children=[
                             dl.TileLayer(),
                             dl.LayerGroup(id='map-pins-layer'), # Camada para pinos padrão
@@ -48,8 +49,6 @@ def get_layout():
         print(f"ERRO CRÍTICO em map_view.get_layout: {e}"); traceback.print_exc(); return html.Div(
             [html.H1("Erro Layout Mapa"), html.Pre(traceback.format_exc())])
 
-
-# --- Callbacks da Página do Mapa ---
 
 # Callback 1: Atualiza os Pinos no mapa (Pinos padrão)
 @app.callback(Output('map-pins-layer', 'children'), Input('store-dados-sessao', 'data'))
@@ -101,7 +100,7 @@ def get_color_class_chuva(value):
 
 RISCO_MAP = {"LIVRE": 0, "ATENÇÃO": 1, "ALERTA": 2, "PARALIZAÇÃO": 3, "SEM DADOS": -1, "ERRO": -1}
 
-# --- Função auxiliar create_km_block (MODIFICADA - Gauge Umidade Níveis Fixos) ---
+# --- Função auxiliar create_km_block (Mantida) ---
 def create_km_block(id_ponto, config, df_ponto):
     ultima_chuva_72h = 0.0;
     umidade_1m_atual = 0.0; umidade_2m_atual = 0.0; umidade_3m_atual = 0.0
@@ -143,7 +142,7 @@ def create_km_block(id_ponto, config, df_ponto):
     chuva_max_visual = 90.0
     chuva_percent = max(0, min(100, (ultima_chuva_72h / chuva_max_visual) * 100))
 
-    # --- INÍCIO DA ALTERAÇÃO: Calcular altura da barra de umidade com NÍVEIS FIXOS ---
+    # --- Lógica: Calcular altura da barra de umidade com NÍVEIS FIXOS ---
     umidade_percent_realista = 0 # Default para SEM DADOS ou ERRO
     risco_umidade = RISCO_MAP.get(status_umid_txt, -1) # Usa status padrão (ATENÇÃO, etc)
 
@@ -156,7 +155,7 @@ def create_km_block(id_ponto, config, df_ponto):
     elif risco_umidade == 3: # PARALIZAÇÃO
         umidade_percent_realista = 100
     # else: SEM DADOS/ERRO -> 0%
-    # --- FIM DA ALTERAÇÃO ---
+    # --- FIM DA LÓGICA ---
 
 
     chuva_gauge = html.Div( # Gauge Chuva

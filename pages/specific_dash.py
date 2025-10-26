@@ -1,4 +1,4 @@
-# pages/specific_dash.py (CORRIGIDO - Legenda do PDF na parte superior)
+# pages/specific_dash.py (CORRIGIDO - Legendas simplificadas)
 
 import dash
 from dash import html, dcc, callback, Input, Output, State
@@ -25,9 +25,13 @@ CORES_ALERTAS_CSS = {
     "vermelho": "#dc3545",
     "cinza": "grey"
 }
-CORES_UMIDADE = {'umidade_1m_perc': CORES_ALERTAS_CSS["verde"],
-                 'umidade_2m_perc': CORES_ALERTAS_CSS["amarelo"],
-                 'umidade_3m_perc': CORES_ALERTAS_CSS["vermelho"]}
+# --- INÍCIO DA ALTERAÇÃO 1: Atualizar Mapa de Cores ---
+CORES_UMIDADE = {
+    '1m': CORES_ALERTAS_CSS["verde"],
+    '2m': CORES_ALERTAS_CSS["amarelo"],  # Amarelo Ouro
+    '3m': CORES_ALERTAS_CSS["vermelho"]
+}
+# --- FIM DA ALTERAÇÃO 1 ---
 
 RISCO = {"LIVRE": 0, "ATENÇÃO": 1, "ALERTA": 2, "PARALIZAÇÃO": 3, "SEM DADOS": -1, "INDEFINIDO": -1}
 mapa_status_cor_geral = {
@@ -41,22 +45,17 @@ mapa_status_cor_geral = {
 
 # --- Layout da Página Específica ---
 def get_layout():
+    # ... (código mantido idêntico) ...
     opcoes_tempo = [{'label': f'Últimas {h} horas', 'value': h} for h in [1, 3, 6, 12, 18, 24, 72, 84, 96]] + [
         {'label': 'Todo o Histórico', 'value': 14 * 24}]
-
     return dbc.Container([
         dcc.Store(id='store-id-ponto-ativo'),
-
         dbc.Row(id='specific-dash-cards', children=[dbc.Spinner(size="lg")]),
-
         dbc.Row([dbc.Col(dbc.Label("Período (Gráficos):"), width="auto"), dbc.Col(
             dcc.Dropdown(id='graph-time-selector', options=opcoes_tempo, value=72, clearable=False, searchable=False),
             width=12, lg=4)], align="center", className="my-3"),
-
         dbc.Row(id='specific-dash-graphs', children=[dbc.Spinner(size="lg")], className="my-4"),
-
         dbc.Row([dbc.Col(dbc.Card(dbc.CardBody([
-            # Textos removidos
             dcc.DatePickerRange(id='pdf-date-picker', start_date=(
                     pd.Timestamp.now() - pd.Timedelta(days=7)).date(),
                                 end_date=pd.Timestamp.now().date(),
@@ -72,7 +71,7 @@ def get_layout():
 
 # --- Callbacks da Página Específica ---
 
-# Callback 1: Atualiza o dashboard (Mantido)
+# Callback 1: Atualiza o dashboard
 @app.callback(
     [
         Output('specific-dash-cards', 'children'),
@@ -86,7 +85,7 @@ def get_layout():
     ]
 )
 def update_specific_dashboard(pathname, dados_json, selected_hours):
-    # ... (código mantido idêntico) ...
+    # ... (código de setup e leitura de dados mantido) ...
     if not dados_json or not pathname.startswith('/ponto/') or selected_hours is None:
         return dash.no_update, dash.no_update, dash.no_update
     id_ponto = "";
@@ -118,16 +117,26 @@ def update_specific_dashboard(pathname, dados_json, selected_hours):
         if pd.isna(umidade_3m_atual): umidade_3m_atual = base_3m
     except IndexError:
         return "Dados insuficientes.", "", id_ponto
+
+    # 1. Status Chuva
     status_chuva_txt, status_chuva_col = processamento.definir_status_chuva(ultima_chuva_72h)
     risco_chuva = RISCO.get(status_chuva_txt, -1)
+
+    # 2. Status GERAL Umidade (Fluxograma)
     status_umid_txt, status_umid_col_bootstrap, _ = processamento.definir_status_umidade_hierarquico(
         umidade_1m_atual, umidade_2m_atual, umidade_3m_atual, base_1m, base_2m, base_3m
     )
     risco_umidade = RISCO.get(status_umid_txt, -1)
+
+    # 3. Status GERAL (Max(Chuva, Umidade))
     risco_geral = max(risco_chuva, risco_umidade)
+
+    # 4. Texto e Cor do Status Geral
     status_geral_texto, status_geral_cor_bootstrap = mapa_status_cor_geral.get(risco_geral, ("INDEFINIDO", "secondary"))
     if risco_umidade > risco_chuva and risco_umidade > 0:
         status_geral_texto, status_geral_cor_bootstrap, _ = processamento.STATUS_MAP_HIERARQUICO[risco_umidade]
+
+    # 5. Cores Individuais para Card de Umidade
     css_color_s1 = CORES_ALERTAS_CSS["amarelo"] if (
                                                                umidade_1m_atual - base_1m) >= processamento.DELTA_TRIGGER_UMIDADE else \
     CORES_ALERTAS_CSS["verde"]
@@ -137,6 +146,8 @@ def update_specific_dashboard(pathname, dados_json, selected_hours):
     css_color_s3 = CORES_ALERTAS_CSS["vermelho"] if (
                                                                 umidade_3m_atual - base_3m) >= processamento.DELTA_TRIGGER_UMIDADE else \
     CORES_ALERTAS_CSS["verde"]
+
+    # Layout dos Cards (Mantido)
     layout_cards = [
         dbc.Col(dbc.Card(dbc.CardBody([html.H5("Status Atual"), html.P(status_geral_texto, className="fs-3 fw-bold")]),
                          color=status_geral_cor_bootstrap,
@@ -177,12 +188,16 @@ def update_specific_dashboard(pathname, dados_json, selected_hours):
             ]),
             className="shadow h-100"), xs=12, md=4, className="mb-4"),
     ]
+
+    # Filtra dados para gráficos
     PONTOS_POR_HORA = int(60 / (FREQUENCIA_SIMULACAO.total_seconds() / 60))
     n_pontos_desejados = selected_hours * PONTOS_POR_HORA
     n_pontos_plot = min(n_pontos_desejados, len(df_ponto))
     df_ponto_plot = df_ponto.tail(n_pontos_plot);
     df_chuva_72h_plot = df_chuva_72h.tail(n_pontos_plot)
     n_horas_titulo = selected_hours
+
+    # Gráfico de Chuva (Mantido)
     fig_chuva = make_subplots(specs=[[{"secondary_y": True}]])
     fig_chuva.add_trace(
         go.Bar(x=df_ponto_plot['timestamp'], y=df_ponto_plot['chuva_mm'], name='Pluviometria Horária (mm)',
@@ -197,22 +212,36 @@ def update_specific_dashboard(pathname, dados_json, selected_hours):
                             yaxis2_title="Precipitação Acumulada (mm)", hovermode="x unified", bargap=0.1)
     fig_chuva.update_yaxes(title_text="Pluviometria Horária (mm)", secondary_y=False);
     fig_chuva.update_yaxes(title_text="Precipitação Acumulada (mm)", secondary_y=True)
+
+    # Gráfico de Umidade
     df_umidade = df_ponto_plot.melt(id_vars=['timestamp'],
                                     value_vars=['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'],
                                     var_name='Sensor', value_name='Umidade (%)')
+
+    # --- INÍCIO DA ALTERAÇÃO 2: Renomear sensores ---
+    df_umidade['Sensor'] = df_umidade['Sensor'].replace({
+        'umidade_1m_perc': '1m',
+        'umidade_2m_perc': '2m',
+        'umidade_3m_perc': '3m'
+    })
+    # --- FIM DA ALTERAÇÃO 2 ---
+
     fig_umidade = px.line(df_umidade, x='timestamp', y='Umidade (%)', color='Sensor',
-                          title=f"Variação da Umidade ({n_horas_titulo}h)", color_discrete_map=CORES_UMIDADE)
+                          title=f"Variação da Umidade ({n_horas_titulo}h)",
+                          color_discrete_map=CORES_UMIDADE)  # Usa novo mapa de cores
     fig_umidade.update_traces(line=dict(width=3));
     fig_umidade.update_layout(template=TEMPLATE_GRAFICO_MODERNO, margin=dict(l=40, r=20, t=40, b=50),
                               legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))
+
     layout_graficos = [
         dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_chuva)), className="shadow-sm"), width=12, className="mb-4"),
         dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_umidade)), className="shadow-sm"), width=12,
                 className="mb-4"), ]
+
     return layout_cards, layout_graficos, id_ponto
 
 
-# Callback 2: Gerar o PDF (MODIFICADO - Legenda e Margem)
+# Callback 2: Gerar o PDF (MODIFICADO - Legenda)
 @app.callback(
     Output('download-pdf-especifico', 'data'),
     Input('btn-pdf-especifico', 'n_clicks'),
@@ -281,31 +310,36 @@ def gerar_download_pdf_especifico(n_clicks, start_date_str, end_date_str, id_pon
     fig_chuva_pdf.add_trace(
         go.Scatter(x=df_chuva_72h_plot['timestamp_str'], y=df_chuva_72h_plot['chuva_mm'], name='Acumulada (72h)',
                    mode='lines', line=dict(color='#007BFF')), secondary_y=True)
+
     df_umidade_pdf_melted = df_periodo_plot.melt(id_vars=['timestamp_str'],
                                                  value_vars=['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'],
                                                  var_name='Sensor', value_name='Umidade (%)')
+    # --- INÍCIO DA ALTERAÇÃO 3: Renomear sensores (PDF) ---
+    df_umidade_pdf_melted['Sensor'] = df_umidade_pdf_melted['Sensor'].replace({
+        'umidade_1m_perc': '1m',
+        'umidade_2m_perc': '2m',
+        'umidade_3m_perc': '3m'
+    })
+    # --- FIM DA ALTERAÇÃO 3 ---
+
     fig_umidade_pdf = px.line(df_umidade_pdf_melted, x='timestamp_str', y='Umidade (%)', color='Sensor',
-                              title="Umidade do Solo - Período Selecionado", color_discrete_map=CORES_UMIDADE)
+                              title="Umidade do Solo - Período Selecionado",
+                              color_discrete_map=CORES_UMIDADE)  # Usa novo mapa de cores
     fig_umidade_pdf.update_traces(line=dict(width=3))
 
-    # --- INÍCIO DA ALTERAÇÃO: Legenda e Margem do PDF ---
+    # Ajuste da legenda do PDF (Mantido da última correção)
     fig_chuva_pdf.update_layout(title_text="Pluviometria - Período Selecionado", template=TEMPLATE_GRAFICO_MODERNO,
-                                legend=dict(orientation="h",
-                                            yanchor="bottom", y=1.02,  # Posição acima do título
-                                            xanchor="center", x=0.5),
+                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
                                 yaxis_title="Pluv. Horária (mm)", yaxis2_title="Acumulada (mm)", xaxis_title=None,
                                 xaxis_tickangle=-45,
-                                margin=dict(b=80, t=80))  # Aumenta margem superior (t) e mantém inferior (b)
+                                margin=dict(b=80, t=80))
     fig_chuva_pdf.update_yaxes(title_text="Pluv. Horária (mm)", secondary_y=False);
     fig_chuva_pdf.update_yaxes(title_text="Acumulada (mm)", secondary_y=True)
 
     fig_umidade_pdf.update_layout(template=TEMPLATE_GRAFICO_MODERNO,
-                                  legend=dict(orientation="h",
-                                              yanchor="bottom", y=1.02,  # Posição acima do título
-                                              xanchor="center", x=0.5),
+                                  legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
                                   xaxis_title=None, xaxis_tickangle=-45,
-                                  margin=dict(b=80, t=80))  # Aumenta margem superior (t) e mantém inferior (b)
-    # --- FIM DA ALTERAÇÃO ---
+                                  margin=dict(b=80, t=80))
 
     # Geração do PDF
     pdf_bytes = gerador_pdf.criar_relatorio_em_memoria(df_periodo, fig_chuva_pdf, fig_umidade_pdf,

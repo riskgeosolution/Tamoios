@@ -1,4 +1,4 @@
-# index.py (CORRIGIDO - Definição de nome_do_ponto_gatilho e Lógica de Transição)
+# index.py (CORRIGIDO - Alertas baseados APENAS na Chuva 72h)
 
 import dash
 from dash import html, dcc
@@ -17,7 +17,7 @@ import processamento
 import alertas
 
 
-# --- Layout da Barra de Navegação ---
+# --- Layout da Barra de Navegação (Mantido) ---
 def get_navbar():
     # ... (código mantido idêntico) ...
     logo_riskgeo_path = app.get_asset_url('LogoMarca RiskGeo Solutions.PNG')
@@ -45,16 +45,18 @@ def get_navbar():
     return navbar
 
 
-# --- Layout Principal da Aplicação ---
-# (Mantido idêntico)
+# --- Layout Principal da Aplicação (Mantido) ---
 RISCO = {"LIVRE": 0, "ATENÇÃO": 1, "ALERTA": 2, "PARALIZAÇÃO": 3, "SEM DADOS": -1, "INDEFINIDO": -1}
 mapa_status_cor_geral = {0: ("LIVRE", "success"), 1: ("ATENÇÃO", "warning"), 2: ("ALERTA", "orange"),
                          3: ("PARALIZAÇÃO", "danger"), -1: ("SEM DADOS", "secondary")}
 
+# Variável Global para rastrear o ESTADO DE CHUVA (para evitar race condition)
+ESTADO_ALERTA_SERVIDOR = {}
+
 app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
     dcc.Store(id='store-dados-sessao', storage_type='session'),
-    dcc.Store(id='store-ultimo-status', storage_type='session'),
+    dcc.Store(id='store-ultimo-status', storage_type='session'),  # Agora armazena o status da CHUVA
     dcc.Interval(id='intervalo-atualizacao', interval=2 * 1000, n_intervals=0),
     get_navbar(),
     html.Div(id='page-content')
@@ -66,6 +68,7 @@ app.layout = html.Div([
 # Callback 1: O Roteador de Páginas (Mantido)
 @app.callback(Output('page-content', 'children'), Input('url', 'pathname'))
 def display_page(pathname):
+    # ... (código mantido) ...
     if pathname.startswith('/ponto/'):
         return specific_dash.get_layout()
     elif pathname == '/dashboard-geral':
@@ -77,23 +80,24 @@ def display_page(pathname):
 # Callback 2: Atualização de Dados (Background) (Mantido)
 @app.callback(Output('store-dados-sessao', 'data'), Input('intervalo-atualizacao', 'n_intervals'))
 def carregar_dados_em_background(n_intervals):
+    # ... (código mantido) ...
     import data_source
     print(f"Atualização background (Intervalo {n_intervals}): Buscando dados...")
     df = data_source.get_data();
     return df.to_json(date_format='iso', orient='split')
 
 
-# Callback 3: Verificação de Alertas (Background)
-@app.callback(Output('store-ultimo-status', 'data'), Input('store-dados-sessao', 'data'),
-              State('store-ultimo-status', 'data'))
-def verificar_alertas_em_background(dados_json, status_antigo_json):
-    if not dados_json: return dash.no_update
-    from io import StringIO
-    import pandas as pd
-    import data_source
+# Callback 3: Verificação de Alertas (Background) - MODIFICADO PARA CHUVA
+@app.callback(
+    Output('store-ultimo-status', 'data'),  # Agora salva o status da CHUVA
+    Input('store-dados-sessao', 'data'),
+    State('store-ultimo-status', 'data')  # Usado para inicializar a variável global
+)
+def verificar_alertas_em_background(dados_json, status_antigo_json_store):
+    global ESTADO_ALERTA_SERVIDOR
 
-    status_antigos = json.loads(status_antigo_json) if status_antigo_json else {}
-    status_novos_gerais = {}  # Armazena o status geral (Chuva OU Umidade)
+    if not dados_json:
+        return dash.no_update
 
     try:
         df_completo = pd.read_json(StringIO(dados_json), orient='split')
@@ -102,155 +106,101 @@ def verificar_alertas_em_background(dados_json, status_antigo_json):
         print(f"Erro ao ler JSON em callback de alerta: {e}")
         return dash.no_update
 
-    # Loop para verificar status individual (FORA do try de leitura)
-    for id_ponto, config in data_source.PONTOS_DE_ANALISE.items():
-        df_ponto = df_completo[df_completo['id_ponto'] == id_ponto]
-        status_geral_antigo_ponto = status_antigos.get(id_ponto, "INDEFINIDO")
-        risco_chuva = -1
-        risco_umidade = -1
-        status_chuva_txt = "SEM DADOS"
-        status_umid_txt = "SEM DADOS"
+    # --- Lógica de Sincronização (Mantida) ---
+    if not ESTADO_ALERTA_SERVIDOR and status_antigo_json_store:
+        try:
+            ESTADO_ALERTA_SERVIDOR = json.loads(status_antigo_json_store)
+            print(f"Sincronizando estado (CHUVA) do servidor com o dcc.Store: {ESTADO_ALERTA_SERVIDOR}")
+        except Exception:
+            ESTADO_ALERTA_SERVIDOR = {}
 
-        constantes_ponto = config.get('constantes', {})
-        base_1m = constantes_ponto.get('UMIDADE_BASE_1M', 0.0)
-        base_2m = constantes_ponto.get('UMIDADE_BASE_2M', 0.0)
-        base_3m = constantes_ponto.get('UMIDADE_BASE_3M', 0.0)
+    # Este dicionário será retornado para ATUALIZAR o dcc.Store
+    status_novos_para_store = {}
+
+    # 1. Loop para verificar status individual
+    for id_ponto, config in PONTOS_DE_ANALISE.items():
+
+        # --- INÍCIO DA ALTERAÇÃO 1: Ler o estado de CHUVA anterior ---
+        # Lemos o status de CHUVA anterior da nossa variável global instantânea
+        status_chuva_antigo_ponto = ESTADO_ALERTA_SERVIDOR.get(id_ponto, "INDEFINIDO")
+        # --- FIM DA ALTERAÇÃO 1 ---
+
+        df_ponto = df_completo[df_completo['id_ponto'] == id_ponto]
+
+        # --- INÍCIO DA ALTERAÇÃO 2: Calcular APENAS o status da CHUVA ---
+        # (Ainda calculamos a umidade, mas ela não é usada aqui)
+        status_chuva_txt = "SEM DADOS"
+        # status_umid_txt = "SEM DADOS" # Não é mais usado para alertas
 
         if not df_ponto.empty:
             try:
                 df_chuva_72h = processamento.calcular_acumulado_72h(df_ponto)
-                ultima_chuva_72h = None
-                if not df_chuva_72h.empty:
-                    chuva_val = df_chuva_72h.iloc[-1]['chuva_mm']
-                    if not pd.isna(chuva_val): ultima_chuva_72h = chuva_val
+                ultima_chuva_72h = df_chuva_72h.iloc[-1]['chuva_mm'] if not df_chuva_72h.empty and not pd.isna(
+                    df_chuva_72h.iloc[-1]['chuva_mm']) else None
 
+                # Este é o status que vamos rastrear
                 status_chuva_txt, _ = processamento.definir_status_chuva(ultima_chuva_72h)
-                risco_chuva = RISCO.get(status_chuva_txt, -1)
 
-                ultimo_dado = df_ponto.iloc[-1]
-                umidade_1m_atual = ultimo_dado.get('umidade_1m_perc', None)
-                umidade_2m_atual = ultimo_dado.get('umidade_2m_perc', None)
-                umidade_3m_atual = ultimo_dado.get('umidade_3m_perc', None)
-
-                status_umid_txt, _, _ = processamento.definir_status_umidade_hierarquico(
-                    umidade_1m_atual, umidade_2m_atual, umidade_3m_atual, base_1m, base_2m, base_3m
-                )
-                risco_umidade = RISCO.get(status_umid_txt, -1)
+                # --- Lógica de umidade (calculada mas não usada para alertas) ---
+                # ultimo_dado = df_ponto.iloc[-1]
+                # ... (cálculo de umidade omitido daqui, pois não é mais relevante para o 'deve_enviar')
 
             except Exception as e_calc:
-                print(f"Erro cálculo alerta para {id_ponto}: {e_calc}")
+                print(f"Erro cálculo alerta para {id_ponto}: {e_calc}");
                 status_chuva_txt = "ERRO"
-                status_umid_txt = "ERRO"
-                risco_chuva = -1
-                risco_umidade = -1
 
-        risco_geral_novo = max(risco_chuva, risco_umidade)
-        if risco_chuva == -1 and risco_umidade == 0: risco_geral_novo = -1
-        if risco_umidade == -1 and risco_chuva == 0: risco_geral_novo = -1
+        # --- FIM DA ALTERAÇÃO 2 ---
 
-        status_geral_novo_txt, status_geral_novo_cor = mapa_status_cor_geral.get(risco_geral_novo,
-                                                                                 ("INDEFINIDO", "secondary"))
-        if risco_umidade > risco_chuva and risco_umidade > 0:
-            status_geral_novo_txt, status_geral_novo_cor, _ = processamento.STATUS_MAP_HIERARQUICO[risco_umidade]
+        # --- INÍCIO DA ALTERAÇÃO 3: Lógica de Alerta (Baseada APENAS na CHUVA) ---
 
-        # Armazena o status geral final (Chuva ou Umidade)
-        status_novos_gerais[id_ponto] = status_geral_novo_txt
+        # A transição real é quando o status de CHUVA calculado é diferente do status de CHUVA salvo.
+        if status_chuva_txt != status_chuva_antigo_ponto:
 
-        # Lógica de alerta individual (REGISTRA APENAS LOG)
-        if status_geral_novo_txt != status_geral_antigo_ponto:
-            print(
-                f"ALERTA INDIVIDUAL: Ponto {id_ponto} mudou de {status_geral_antigo_ponto} -> {status_geral_novo_txt}")
+            print(f"ALERTA (CHUVA): Ponto {id_ponto} mudou de {status_chuva_antigo_ponto} -> {status_chuva_txt}")
 
-            # Converte nomes do fluxograma para nomes padrão para o log
-            status_log = status_geral_novo_txt
-            if status_log == "VERMELHO":
-                status_log = "PARALIZAÇÃO"
-            elif status_log == "LARANJA":
-                status_log = "ALERTA"
-            elif status_log == "AMARELO":
-                status_log = "ATENÇÃO"
+            # ATUALIZA o estado de CHUVA na variável global IMEDIATAMENTE.
+            ESTADO_ALERTA_SERVIDOR[id_ponto] = status_chuva_txt
 
-            if status_log in ["ATENÇÃO", "ALERTA", "PARALIZAÇÃO"]:
-                # Esta linha só registra o log, e-mail/SMS DESATIVADO
-                print(
-                    f"--- Aviso: Alerta Individual {status_log} detectado para {id_ponto}, mas o envio de e-mail/SMS foi desativado. ---")
-            else:
-                print(f"Ponto {id_ponto} normalizado. (Status Geral: {status_geral_novo_txt}).")
+            deve_enviar = False
 
-    # --- INÍCIO DA LÓGICA (ALERTA DE PARALIZAÇÃO TOTAL - CONTROLE DE TRANSIÇÃO) ---
+            # REGRA 1: ALERTA -> PARALIZAÇÃO (Crítico)
+            if status_chuva_txt == "PARALIZAÇÃO" and status_chuva_antigo_ponto == "ALERTA":
+                deve_enviar = True
+                print(">>> Transição CRÍTICA (CHUVA: ALERTA->PARALIZAÇÃO) detectada. Disparando alarme.")
 
-    # 1. Obter o status geral anterior (SISTEMA_GERAL) do store de status antigos
-    ultimo_status_geral_enviado = status_antigos.get('SISTEMA_GERAL', 'NAO_PARALISADO')
+            # REGRA 2: ATENÇÃO -> LIVRE (Retorno à Normalidade)
+            elif status_chuva_txt == "LIVRE" and status_chuva_antigo_ponto == "ATENÇÃO":
+                deve_enviar = True
+                print(">>> Transição de NORMALIZAÇÃO (CHUVA: ATENÇÃO->LIVRE) detectada. Disparando alarme.")
 
-    # 2. Verificar se TODOS os pontos estão em PARALIZAÇÃO AGORA
-    todos_paralizados_agora = False
-    if status_novos_gerais and len(status_novos_gerais) == len(data_source.PONTOS_DE_ANALISE):
-        todos_paralizados_agora = all(
-            status in ["PARALIZAÇÃO", "VERMELHO"] for status in status_novos_gerais.values()
-        )
+            if deve_enviar:
+                # TENTA ENVIAR O ALERTA (Chama o alertas.py)
+                try:
+                    alertas.enviar_alerta(
+                        id_ponto,
+                        config.get('nome', id_ponto),
+                        status_chuva_txt,  # Novo Status (Chuva)
+                        status_chuva_antigo_ponto  # Status Anterior (Chuva)
+                    )
+                except Exception as e:
+                    print(f"AVISO: Falha na notificação para {id_ponto}. Erro: {e}")
 
-    # 3. Definir o NOVO estado lógico do sistema
-    novo_status_geral_logico = 'PARALISADO' if todos_paralizados_agora else 'NAO_PARALISADO'
+            # Salva o novo status (de chuva) para o dcc.Store (para persistência)
+            status_novos_para_store[id_ponto] = status_chuva_txt
 
-    # 4. Enviar alerta APENAS se o estado lógico MUDOU (Controle de Transição)
+        else:
+            # Se não houve mudança, apenas registra o status atual (MANTIDO)
+            status_novos_para_store[id_ponto] = status_chuva_antigo_ponto
 
-    # Define as variáveis de identificação para a chamada do alerta (para evitar NameError)
-    ID_ALERTA_GERAL = "SISTEMA_GERAL"
-    NOME_ALERTA_GERAL = "Todos os Pontos"
+        # --- FIM DA ALTERAÇÃO 3 ---
 
-    # Verifica a transição e TENTA enviar o alerta
-    if novo_status_geral_logico != ultimo_status_geral_enviado:
+    # --- FIM DO BLOCO DE ENVIO INDIVIDUAL ---
 
-        if novo_status_geral_logico == 'PARALISADO':
-            print("ALERTA DE SISTEMA: Todos os pontos entraram em PARALIZAÇÃO TOTAL. DISPARANDO EMAIL/SMS.")
-            try:
-                # Tenta notificar - APENAS UMA VEZ POR TRANSIÇÃO
-                alertas.enviar_alerta(
-                    ID_ALERTA_GERAL,
-                    NOME_ALERTA_GERAL,
-                    "PARALIZAÇÃO TOTAL",
-                    "danger"  # Cor 'danger' (vermelho)
-                )
-            except Exception as e:
-                # Captura a exceção de falha total de notificação
-                print(f"FALHA NO ENVIO GERAL (PARALIZAÇÃO): {e}")
-
-        elif novo_status_geral_logico == 'NAO_PARALISADO':
-            print("ALERTA DE SISTEMA: O sistema SAIU da PARALIZAÇÃO TOTAL. DISPARANDO EMAIL/SMS.")
-            try:
-                # Tenta notificar - APENAS UMA VEZ POR TRANSIÇÃO
-                alertas.enviar_alerta(
-                    ID_ALERTA_GERAL,
-                    NOME_ALERTA_GERAL,
-                    "SISTEMA NORMALIZADO",
-                    "success"
-                )
-            except Exception as e:
-                # Captura a exceção de falha total de notificação
-                print(f"FALHA NO ENVIO GERAL (NORMALIZAÇÃO): {e}")
-
-        # --- A CORREÇÃO FINAL: SALVAR O ESTADO ---
-        # Se houve uma transição, SEMPRE salve o novo estado lógico para bloquear a repetição,
-        # independentemente do resultado do try/except acima.
-        status_novos_gerais['SISTEMA_GERAL'] = novo_status_geral_logico
-        print("AVISO: Transição de estado total registrada e salvada. Repetição bloqueada.")
-
-    else:
-        print(f"Alerta Geral: {novo_status_geral_logico}. Sem mudança de estado total, não envia e-mail/SMS.")
-        # Se não houve transição, apenas garante que o estado atual seja persistido
-        status_novos_gerais['SISTEMA_GERAL'] = novo_status_geral_logico
-
-        # --- FIM DA NOVA LÓGICA ---
-
-    # Salva o dicionário de status individuais (AGORA INCLUINDO O NOVO STATUS GERAL)
-    return json.dumps(status_novos_gerais)
+    # Salva o dicionário de status (de CHUVA) no dcc.Store
+    return json.dumps(status_novos_para_store)
 
 
-# Callback para o toggler do navbar (Ainda comentado)
-# @app.callback(...)
-# def toggle_navbar_collapse(n, is_open): ...
-
-# --- SEÇÃO DE EXECUÇÃO LOCAL ---
+# --- SEÇÃO DE EXECUÇÃO LOCAL (Mantida) ---
 if __name__ == '__main__':
     host = '127.0.0.1'
     port = 8050

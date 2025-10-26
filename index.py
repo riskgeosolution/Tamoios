@@ -1,4 +1,4 @@
-# index.py (CORRIGIDO - Alertas baseados APENAS na Chuva 72h)
+# index.py (CORRIGIDO - storage_type='memory' para o Render)
 
 import dash
 from dash import html, dcc
@@ -19,7 +19,6 @@ import alertas
 
 # --- Layout da Barra de Navegação (Mantido) ---
 def get_navbar():
-    # ... (código mantido idêntico) ...
     logo_riskgeo_path = app.get_asset_url('LogoMarca RiskGeo Solutions.PNG')
     logo_tamoios_path = app.get_asset_url('tamoios.PNG')
     cor_fundo_navbar = '#003366'
@@ -53,14 +52,21 @@ mapa_status_cor_geral = {0: ("LIVRE", "success"), 1: ("ATENÇÃO", "warning"), 2
 # Variável Global para rastrear o ESTADO DE CHUVA (para evitar race condition)
 ESTADO_ALERTA_SERVIDOR = {}
 
+# --- INÍCIO DA ALTERAÇÃO (Render) ---
 app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
-    dcc.Store(id='store-dados-sessao', storage_type='session'),
-    dcc.Store(id='store-ultimo-status', storage_type='session'),  # Agora armazena o status da CHUVA
+
+    # Alterado de 'session' para 'memory' para evitar consumo excessivo de bandwidth
+    dcc.Store(id='store-dados-sessao', storage_type='memory'),
+    dcc.Store(id='store-ultimo-status', storage_type='memory'),  # Agora armazena o status da CHUVA
+
     dcc.Interval(id='intervalo-atualizacao', interval=2 * 1000, n_intervals=0),
     get_navbar(),
     html.Div(id='page-content')
 ])
+
+
+# --- FIM DA ALTERAÇÃO ---
 
 
 # --- Callbacks ---
@@ -68,7 +74,6 @@ app.layout = html.Div([
 # Callback 1: O Roteador de Páginas (Mantido)
 @app.callback(Output('page-content', 'children'), Input('url', 'pathname'))
 def display_page(pathname):
-    # ... (código mantido) ...
     if pathname.startswith('/ponto/'):
         return specific_dash.get_layout()
     elif pathname == '/dashboard-geral':
@@ -80,14 +85,15 @@ def display_page(pathname):
 # Callback 2: Atualização de Dados (Background) (Mantido)
 @app.callback(Output('store-dados-sessao', 'data'), Input('intervalo-atualizacao', 'n_intervals'))
 def carregar_dados_em_background(n_intervals):
-    # ... (código mantido) ...
     import data_source
     print(f"Atualização background (Intervalo {n_intervals}): Buscando dados...")
     df = data_source.get_data();
+    # Como o store agora é 'memory', este return é lido por outros callbacks
+    # no mesmo servidor, sem enviar o JSON para o navegador.
     return df.to_json(date_format='iso', orient='split')
 
 
-# Callback 3: Verificação de Alertas (Background) - MODIFICADO PARA CHUVA
+# Callback 3: Verificação de Alertas (Background) - (Baseado na CHUVA)
 @app.callback(
     Output('store-ultimo-status', 'data'),  # Agora salva o status da CHUVA
     Input('store-dados-sessao', 'data'),
@@ -120,17 +126,13 @@ def verificar_alertas_em_background(dados_json, status_antigo_json_store):
     # 1. Loop para verificar status individual
     for id_ponto, config in PONTOS_DE_ANALISE.items():
 
-        # --- INÍCIO DA ALTERAÇÃO 1: Ler o estado de CHUVA anterior ---
         # Lemos o status de CHUVA anterior da nossa variável global instantânea
         status_chuva_antigo_ponto = ESTADO_ALERTA_SERVIDOR.get(id_ponto, "INDEFINIDO")
-        # --- FIM DA ALTERAÇÃO 1 ---
 
         df_ponto = df_completo[df_completo['id_ponto'] == id_ponto]
 
-        # --- INÍCIO DA ALTERAÇÃO 2: Calcular APENAS o status da CHUVA ---
-        # (Ainda calculamos a umidade, mas ela não é usada aqui)
+        # Calcular APENAS o status da CHUVA
         status_chuva_txt = "SEM DADOS"
-        # status_umid_txt = "SEM DADOS" # Não é mais usado para alertas
 
         if not df_ponto.empty:
             try:
@@ -141,17 +143,11 @@ def verificar_alertas_em_background(dados_json, status_antigo_json_store):
                 # Este é o status que vamos rastrear
                 status_chuva_txt, _ = processamento.definir_status_chuva(ultima_chuva_72h)
 
-                # --- Lógica de umidade (calculada mas não usada para alertas) ---
-                # ultimo_dado = df_ponto.iloc[-1]
-                # ... (cálculo de umidade omitido daqui, pois não é mais relevante para o 'deve_enviar')
-
             except Exception as e_calc:
                 print(f"Erro cálculo alerta para {id_ponto}: {e_calc}");
                 status_chuva_txt = "ERRO"
 
-        # --- FIM DA ALTERAÇÃO 2 ---
-
-        # --- INÍCIO DA ALTERAÇÃO 3: Lógica de Alerta (Baseada APENAS na CHUVA) ---
+        # Lógica de Alerta (Baseada APENAS na CHUVA)
 
         # A transição real é quando o status de CHUVA calculado é diferente do status de CHUVA salvo.
         if status_chuva_txt != status_chuva_antigo_ponto:
@@ -191,10 +187,6 @@ def verificar_alertas_em_background(dados_json, status_antigo_json_store):
         else:
             # Se não houve mudança, apenas registra o status atual (MANTIDO)
             status_novos_para_store[id_ponto] = status_chuva_antigo_ponto
-
-        # --- FIM DA ALTERAÇÃO 3 ---
-
-    # --- FIM DO BLOCO DE ENVIO INDIVIDUAL ---
 
     # Salva o dicionário de status (de CHUVA) no dcc.Store
     return json.dumps(status_novos_para_store)

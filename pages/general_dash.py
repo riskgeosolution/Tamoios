@@ -1,4 +1,4 @@
-# pages/general_dash.py (CORRIGIDO - Legendas simplificadas)
+# pages/general_dash.py (CORRIGIDO - "Umidade" -> "Umidade Solo")
 
 import dash
 from dash import html, dcc, callback, Input, Output
@@ -98,22 +98,25 @@ def update_general_dashboard(dados_json, selected_hours):
         fig_chuva.update_yaxes(title_text="Pluv. Horária (mm)", secondary_y=False);
         fig_chuva.update_yaxes(title_text="Acumulada (mm)", secondary_y=True)
 
+        # --- INÍCIO DA ALTERAÇÃO 2: "Umidade" -> "Umidade Solo" ---
         # Gráfico de Umidade
         df_umidade = df_ponto_plot.melt(id_vars=['timestamp'],
                                         value_vars=['umidade_1m_perc', 'umidade_2m_perc', 'umidade_3m_perc'],
-                                        var_name='Sensor', value_name='Umidade (%)')
+                                        var_name='Sensor', value_name='Umidade Solo (%)')  # Alterado aqui
 
-        # --- INÍCIO DA ALTERAÇÃO 2: Renomear sensores ---
+        # --- INÍCIO DA ALTERAÇÃO: Renomear sensores ---
         df_umidade['Sensor'] = df_umidade['Sensor'].replace({
             'umidade_1m_perc': '1m',
             'umidade_2m_perc': '2m',
             'umidade_3m_perc': '3m'
         })
+        # --- FIM DA ALTERAÇÃO ---
+
+        fig_umidade = px.line(df_umidade, x='timestamp', y='Umidade Solo (%)', color='Sensor',  # Alterado aqui
+                              title=f"Umidade Solo - {config['nome']} ({n_horas_titulo}h)",  # Alterado aqui
+                              color_discrete_map=CORES_UMIDADE)  # Usa novo mapa de cores
         # --- FIM DA ALTERAÇÃO 2 ---
 
-        fig_umidade = px.line(df_umidade, x='timestamp', y='Umidade (%)', color='Sensor',
-                              title=f"Umidade - {config['nome']} ({n_horas_titulo}h)",
-                              color_discrete_map=CORES_UMIDADE)  # Usa novo mapa de cores
         fig_umidade.update_traces(line=dict(width=3))
         fig_umidade.update_layout(template=TEMPLATE_GRAFICO_MODERNO, margin=dict(l=40, r=20, t=40, b=50),
                                   legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5))

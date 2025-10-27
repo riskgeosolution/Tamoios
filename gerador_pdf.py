@@ -63,7 +63,11 @@ def criar_relatorio_em_memoria(df_periodo, fig_chuva, fig_umidade, status_atual,
     pdf.cell(0, 10, "Gráfico de Chuva Acumulada (72h)", 0, 1, "L")
     pdf.image(io.BytesIO(img_chuva_bytes), x=pdf.get_x() + 10, y=pdf.get_y(), w=180)
     pdf.ln(95)  # Pula o espaço da imagem
-    pdf.cell(0, 10, "Gráfico de Variação da Umidade", 0, 1, "L")
+
+    # --- INÍCIO DA ALTERAÇÃO ---
+    pdf.cell(0, 10, "Gráfico de Variação da Umidade Solo", 0, 1, "L")  # Alterado aqui
+    # --- FIM DA ALTERAÇÃO ---
+
     pdf.image(io.BytesIO(img_umidade_bytes), x=pdf.get_x() + 10, y=pdf.get_y(), w=180)
     pdf.ln(95)
 
@@ -92,7 +96,7 @@ def criar_relatorio_em_memoria(df_periodo, fig_chuva, fig_umidade, status_atual,
     if 'umidade_3m_perc' in df_tabela.columns:
         df_tabela['umidade_3m_perc'] = df_tabela['umidade_3m_perc'].round(1).astype(str) + '%'
 
-    # Cabeçalho da Tabela
+    # Cabeçalho da Tabela (Mantido como "Umid." para preservar o layout)
     col_width = pdf.w / 5.5
     pdf.cell(col_width * 1.5, 5, "Timestamp", 1)
     pdf.cell(col_width, 5, "Chuva (mm)", 1)

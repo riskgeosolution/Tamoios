@@ -1,14 +1,15 @@
-# data_source.py (CORRIGIDO - Lógica de Fase + Linear Correta)
+# data_source.py (CORRIGIDO - Lógica de Atraso, Fase, e KeyError)
 
 import pandas as pd
 import numpy as np
-# (Restante dos imports mantidos)
 import httpx
 import os
 import random
 import datetime
 from math import floor
 
+
+# (Mantido da sua versão)
 def _gerar_script_de_chuva_ciclico(total_chuva_mm, horas_chuva, horas_seca, pontos_por_hora, num_eventos_chuva):
     # ... (Função mantida idêntica) ...
     total_pontos_chuva = horas_chuva * pontos_por_hora
@@ -17,7 +18,7 @@ def _gerar_script_de_chuva_ciclico(total_chuva_mm, horas_chuva, horas_seca, pont
     eventos_reais = min(num_eventos_chuva, total_pontos_chuva)
     populacao_indices = np.arange(total_pontos_chuva)
     if eventos_reais > len(populacao_indices):
-       eventos_reais = len(populacao_indices)
+        eventos_reais = len(populacao_indices)
 
     if eventos_reais > 0:
         indices_de_chuva = np.random.choice(populacao_indices, eventos_reais, replace=False)
@@ -28,29 +29,34 @@ def _gerar_script_de_chuva_ciclico(total_chuva_mm, horas_chuva, horas_seca, pont
         valid_indices = indices_de_chuva[indices_de_chuva < len(script_chuva)]
         valid_valores = valores_chuva[indices_de_chuva < len(script_chuva)]
         if len(valid_indices) > 0:
-             script_chuva[valid_indices] = valid_valores
+            script_chuva[valid_indices] = valid_valores
     script_seca = np.zeros(total_pontos_seca)
     script_final = np.concatenate((script_chuva, script_seca))
-    print(f"  -> Script de chuva gerado: {len(script_final)} pontos ({horas_chuva}h chuva + {horas_seca}h seca), somando {np.sum(script_final):.1f}mm.")
+    print(
+        f"  -> Script de chuva gerado: {len(script_final)} pontos ({horas_chuva}h chuva + {horas_seca}h seca), somando {np.sum(script_final):.1f}mm.")
     return list(script_final)
 
 
-# --- Constantes para a Lógica Linear ---
-# (Mantidas da versão anterior)
-RISE_S1_START = 0.0; RISE_S1_END = 55.0
-RISE_S2_START = RISE_S1_END; RISE_S2_END = 72.0
-RISE_S3_START = RISE_S2_END; RISE_S3_END = 95.0
-FALL_S1_START = 120.0; FALL_S1_END = 95.0
-FALL_S2_START = 95.0; FALL_S2_END = 69.0
-FALL_S3_START = 69.0; FALL_S3_END = 0.0
+# --- Constantes de Atraso (Delay) (Mantidas) ---
+RISE_S1_START = 0.0;
+RISE_S1_END = 55.0
+RISE_S2_START = RISE_S1_END;
+RISE_S2_END = 72.0  # (Inicia em 55mm)
+RISE_S3_START = RISE_S2_END;
+RISE_S3_END = 95.0  # (Inicia em 72mm)
+
+FALL_START_ALL = 120.0
+FALL_END_1M = 95.0
+FALL_END_2M = 69.0
+FALL_END_3M = 0.0
 
 # --- Constantes do Simulador (Geral) ---
-# (Mantidas da versão anterior)
+# (Mantidas da sua versão)
 CONSTANTES_PADRAO = {
     "UMIDADE_BASE_1M": 28.0, "UMIDADE_BASE_2M": 24.0, "UMIDADE_BASE_3M": 22.0,
     "UMIDADE_SATURACAO": 45.0,
     "LIMITE_CHUVA_24H": 85.0,
-    "LIMITE_CHUVA_72H": 200.0, # Trava de segurança alta mantida
+    "LIMITE_CHUVA_72H": 200.0,
 }
 PERFIL_PONTO_BASE = CONSTANTES_PADRAO.copy();
 PERFIL_PONTO_BASE["UMIDADE_BASE_1M"] = 25.0
@@ -66,7 +72,7 @@ SIMULADORES_GLOBAIS = {};
 DADOS_HISTORICOS_GLOBAIS = {}
 FREQUENCIA_SIMULACAO = datetime.timedelta(minutes=10)
 MAX_HISTORY_POINTS = 14 * 24 * 6
-PASSOS_POR_ATUALIZACAO = 6
+PASSOS_POR_ATUALIZACAO = 6  # Mantido (simulação rápida)
 
 
 # ==============================================================================
@@ -80,8 +86,8 @@ class SensorSimulator:
         self.umidade_3m = self.c.get('UMIDADE_BASE_3M', CONSTANTES_PADRAO['UMIDADE_BASE_3M'])
         self.rain_script = []
         self.simulation_cycle_index = 0
-        self.fase_chuva = 'subindo' # Mantido
-        self.pico_chuva_ciclo = 0.0 # Mantido
+        self.fase_chuva = 'subindo'  # Mantido
+        self.pico_chuva_ciclo = 0.0  # Mantido
 
     # --- MÉTODO _simular_chuva (Mantido Idêntico) ---
     def _simular_chuva(self, history_data, current_timestamp_utc):
@@ -102,8 +108,8 @@ class SensorSimulator:
                 continue
         limite_chuva_72h_config = self.c.get('LIMITE_CHUVA_72H', CONSTANTES_PADRAO.get('LIMITE_CHUVA_72H', 200.0))
         if total_chuva_72h >= limite_chuva_72h_config:
-            print(f"[{current_timestamp_utc.strftime('%Y-%m-%d %H:%M')}] ALERTA DE SEGURANÇA: Limite 72h ({limite_chuva_72h_config}mm) atingido ({total_chuva_72h:.1f}mm).")
-            # Reseta o pico aqui também
+            print(
+                f"[{current_timestamp_utc.strftime('%Y-%m-%d %H:%M')}] ALERTA DE SEGURANÇA: Limite 72h ({limite_chuva_72h_config}mm) atingido ({total_chuva_72h:.1f}mm).")
             self.pico_chuva_ciclo = 0.0
             self.fase_chuva = 'subindo'
             return 0.0
@@ -114,13 +120,12 @@ class SensorSimulator:
         chuva_mm = self.rain_script[script_index]
         return round(chuva_mm, 2)
 
-    # --- MÉTODO _simular_umidade (REESCRITO COM LÓGICA DE FASE CORRETA) ---
+    # --- MÉTODO _simular_umidade (Lógica de Fase Corrigida) ---
     def _simular_umidade(self, history_data, current_timestamp_utc, chuva_mm_neste_passo):
 
         # 1. Calcular o acumulado 72h atual (igual)
         total_chuva_72h = 0.0
         limite_72h = (current_timestamp_utc - datetime.timedelta(hours=72)).replace(tzinfo=datetime.timezone.utc)
-        # Usa history_data que JÁ inclui a chuva deste passo
         for dado in reversed(history_data):
             try:
                 if not isinstance(dado, dict): continue
@@ -134,66 +139,81 @@ class SensorSimulator:
             except Exception:
                 continue
         total_chuva_72h = round(total_chuva_72h, 2)
-        total_chuva_72h = max(0.0, min(total_chuva_72h, FALL_S1_START)) # Garante 0 <= chuva <= 120
+        total_chuva_72h = max(0.0, min(total_chuva_72h, FALL_START_ALL))
 
-        # 2. Definir Bases e Saturação
+        # 2. Definir Bases e Saturação (da sua versão)
         base_1m = self.c.get('UMIDADE_BASE_1M', CONSTANTES_PADRAO['UMIDADE_BASE_1M'])
         base_2m = self.c.get('UMIDADE_BASE_2M', CONSTANTES_PADRAO['UMIDADE_BASE_2M'])
         base_3m = self.c.get('UMIDADE_BASE_3M', CONSTANTES_PADRAO['UMIDADE_BASE_3M'])
         saturacao = self.c.get('UMIDADE_SATURACAO', CONSTANTES_PADRAO['UMIDADE_SATURACAO'])
 
-        # 3. Determinar a Fase (Subindo ou Descendo) - LÓGICA REFINADA
-        self.pico_chuva_ciclo = max(self.pico_chuva_ciclo, total_chuva_72h)
-        if total_chuva_72h < self.pico_chuva_ciclo - 0.5:
-             self.fase_chuva = 'descendo'
-        else:
-             self.fase_chuva = 'subindo'
-             if abs(total_chuva_72h - FALL_S1_START) < 0.1:
-                 self.fase_chuva = 'descendo'
+        # 3. Determinar a Fase (Subindo ou Descendo) - LÓGICA REFINADA (Mantida)
+        # Se a chuva atual for maior que o pico registrado (com tolerância), estamos 'subindo'
+        if total_chuva_72h > self.pico_chuva_ciclo - 0.1:
+            self.fase_chuva = 'subindo'
+            self.pico_chuva_ciclo = max(self.pico_chuva_ciclo, total_chuva_72h)
+        # Se a chuva atual for significativamente menor que o pico, estamos 'descendo'
+        elif total_chuva_72h < self.pico_chuva_ciclo - 0.5:
+            self.fase_chuva = 'descendo'
+        # Se a chuva for muito baixa (perto de 0), resetamos o pico e forçamos 'subindo' para o próximo evento
         if total_chuva_72h < 5.0:
-             self.pico_chuva_ciclo = total_chuva_72h
-             if self.fase_chuva == 'descendo':
-                 self.fase_chuva = 'subindo'
+            self.pico_chuva_ciclo = total_chuva_72h
+            self.fase_chuva = 'subindo'  # Garante que o 1m sempre reaja
 
-        # 4. APLICAR LÓGICA LINEAR DA FASE CORRETA
-        umidade_1m_calc = base_1m # Default
+        # 4. APLICAR LÓGICA LINEAR (RESTAURANDO OS ATRASOS)
+        umidade_1m_calc = base_1m  # Default
         umidade_2m_calc = base_2m
         umidade_3m_calc = base_3m
 
         if self.fase_chuva == 'subindo':
+            # S1 (Sempre reage de 0.0)
+            if total_chuva_72h <= RISE_S1_END:
+                umidade_1m_calc = np.interp(total_chuva_72h, [RISE_S1_START, RISE_S1_END], [base_1m, saturacao])
+            else:
+                umidade_1m_calc = saturacao
+
+            # S2 (Inicia após S1)
+            if total_chuva_72h < RISE_S2_START:
+                umidade_2m_calc = base_2m
+            elif total_chuva_72h <= RISE_S2_END:
+                umidade_2m_calc = np.interp(total_chuva_72h, [RISE_S2_START, RISE_S2_END], [base_2m, saturacao])
+            else:
+                umidade_2m_calc = saturacao
+
+            # S3 (Inicia após S2)
+            if total_chuva_72h < RISE_S3_START:
+                umidade_3m_calc = base_3m
+            elif total_chuva_72h <= RISE_S3_END:
+                umidade_3m_calc = np.interp(total_chuva_72h, [RISE_S3_START, RISE_S3_END], [base_3m, saturacao])
+            else:
+                umidade_3m_calc = saturacao
+
+        else:  # self.fase_chuva == 'descendo'
             # S1
-            if total_chuva_72h <= RISE_S1_END: umidade_1m_calc = np.interp(total_chuva_72h, [RISE_S1_START, RISE_S1_END], [base_1m, saturacao])
-            else: umidade_1m_calc = saturacao
+            if total_chuva_72h >= FALL_END_1M:
+                umidade_1m_calc = np.interp(total_chuva_72h, [FALL_END_1M, FALL_START_ALL], [base_1m, saturacao])
+            else:
+                umidade_1m_calc = base_1m
             # S2
-            if total_chuva_72h < RISE_S2_START: umidade_2m_calc = base_2m
-            elif total_chuva_72h <= RISE_S2_END: umidade_2m_calc = np.interp(total_chuva_72h, [RISE_S2_START, RISE_S2_END], [base_2m, saturacao])
-            else: umidade_2m_calc = saturacao
+            if total_chuva_72h >= FALL_END_2M:
+                umidade_2m_calc = np.interp(total_chuva_72h, [FALL_END_2M, FALL_START_ALL], [base_2m, saturacao])
+            else:
+                umidade_2m_calc = base_2m
             # S3
-            if total_chuva_72h < RISE_S3_START: umidade_3m_calc = base_3m
-            elif total_chuva_72h <= RISE_S3_END: umidade_3m_calc = np.interp(total_chuva_72h, [RISE_S3_START, RISE_S3_END], [base_3m, saturacao])
-            else: umidade_3m_calc = saturacao
-        else: # self.fase_chuva == 'descendo'
-            # S1
-            if total_chuva_72h >= FALL_S1_END: umidade_1m_calc = np.interp(total_chuva_72h, [FALL_S1_END, FALL_S1_START], [base_1m, saturacao])
-            else: umidade_1m_calc = base_1m
-            # S2
-            if total_chuva_72h >= FALL_S2_START: umidade_2m_calc = saturacao
-            elif total_chuva_72h >= FALL_S2_END: umidade_2m_calc = np.interp(total_chuva_72h, [FALL_S2_END, FALL_S2_START], [base_2m, saturacao])
-            else: umidade_2m_calc = base_2m
-            # S3
-            if total_chuva_72h >= FALL_S3_START: umidade_3m_calc = saturacao
-            else: umidade_3m_calc = np.interp(total_chuva_72h, [FALL_S3_END, FALL_S3_START], [base_3m, saturacao])
+            if total_chuva_72h >= FALL_END_3M:
+                umidade_3m_calc = np.interp(total_chuva_72h, [FALL_END_3M, FALL_START_ALL], [base_3m, saturacao])
+            else:
+                umidade_3m_calc = base_3m
 
         # Atualiza os valores do objeto
         self.umidade_1m = umidade_1m_calc
         self.umidade_2m = umidade_2m_calc
         self.umidade_3m = umidade_3m_calc
 
-        # 5. Garantir Limites Finais (Clamp) - Redundante mas seguro
+        # 5. Garantir Limites Finais (Clamp) - (Mantido)
         self.umidade_1m = max(base_1m, min(self.umidade_1m, saturacao))
         self.umidade_2m = max(base_2m, min(self.umidade_2m, saturacao))
         self.umidade_3m = max(base_3m, min(self.umidade_3m, saturacao))
-
 
     def gerar_novo_dado(self, timestamp_utc, history_data):
         # ... (código mantido idêntico) ...
@@ -209,13 +229,15 @@ class SensorSimulator:
                 prev_accum = history_data[-1].get('precipitacao_acumulada_mm', 0.0)
                 novo_acumulado = prev_accum + chuva_mm_neste_passo
             except (IndexError, AttributeError, KeyError):
-                 novo_acumulado = chuva_mm_neste_passo
+                novo_acumulado = chuva_mm_neste_passo
         else:
-             novo_acumulado = chuva_mm_neste_passo
+            novo_acumulado = chuva_mm_neste_passo
         return {"timestamp": ts_str, "pluviometria_mm": round(chuva_mm_neste_passo, 2),
                 "precipitacao_acumulada_mm": round(novo_acumulado, 2),
                 "umidade_1m_perc": round(self.umidade_1m, 2), "umidade_2m_perc": round(self.umidade_2m, 2),
                 "umidade_3m_perc": round(self.umidade_3m, 2)}
+
+
 # ============================================================================
 # --- FIM: CLASSE SensorSimulator ---
 # ============================================================================
@@ -223,12 +245,15 @@ class SensorSimulator:
 
 # ============================================================================
 # --- GERENCIAMENTO DE MÚLTIPLOS PONTOS ---
-# (Mantido idêntico)
 # ============================================================================
 def _inicializar_simuladores():
-    # ... (código mantido) ...
     global DADOS_HISTORICOS_GLOBAIS, SIMULADORES_GLOBAIS
-    if SIMULADORES_GLOBAIS: return
+
+    # --- CORREÇÃO 3: Limpar dicionários para reinicialização ---
+    SIMULADORES_GLOBAIS.clear()
+    DADOS_HISTORICOS_GLOBAIS.clear()
+    # --- FIM DA CORREÇÃO 3 ---
+
     print("Inicializando simuladores ('real-time')...")
     agora_utc = datetime.datetime.now(datetime.timezone.utc)
     minutos_truncados = floor(agora_utc.minute / 10) * 10
@@ -237,6 +262,7 @@ def _inicializar_simuladores():
     for id_ponto, config in PONTOS_DE_ANALISE.items():
         print(f"  - Inicializando {id_ponto} ({config['nome']})...")
         simulador = SensorSimulator(config.get('constantes', CONSTANTES_PADRAO.copy()))
+
         simulador.rain_script = _gerar_script_de_chuva_ciclico(
             total_chuva_mm=120.0, horas_chuva=72, horas_seca=72,
             pontos_por_hora=PONTOS_POR_HORA, num_eventos_chuva=100
@@ -252,42 +278,60 @@ def get_dados_reais_zentra(): print("CHAMANDO API..."); raise NotImplementedErro
 
 
 def get_dados_simulados():
-    # ... (código mantido) ...
     global DADOS_HISTORICOS_GLOBAIS, SIMULADORES_GLOBAIS
-    if not SIMULADORES_GLOBAIS: _inicializar_simuladores()
+    if not SIMULADORES_GLOBAIS:
+        _inicializar_simuladores()
+
     dfs_de_todos_os_pontos = [];
     total_novos_pontos_gerados = 0
-    for id_ponto, simulador in SIMULADORES_GLOBAIS.items():
-        historico_ponto = DADOS_HISTORICOS_GLOBAIS[id_ponto]
+
+    # Copia os IDs dos simuladores para iterar, caso a reinicialização ocorra
+    ids_simuladores = list(SIMULADORES_GLOBAIS.keys())
+
+    for id_ponto in ids_simuladores:
+        simulador = SIMULADORES_GLOBAIS.get(id_ponto)
+        if not simulador:
+            continue  # Simulador foi removido durante o loop? (Improvável, mas seguro)
+
+        # --- CORREÇÃO 4: Acesso Seguro ao Dicionário de Histórico ---
+        historico_ponto = DADOS_HISTORICOS_GLOBAIS.get(id_ponto)
+        # --- FIM DA CORREÇÃO 4 ---
+
         if not historico_ponto:
             print(f"AVISO: Histórico vazio para {id_ponto}, tentando reinicializar...");
-            _inicializar_simuladores();
-            historico_ponto = DADOS_HISTORICOS_GLOBAIS[id_ponto]
-            if not historico_ponto: print(f"ERRO: Falha ao reinicializar {id_ponto}"); continue
+            _inicializar_simuladores();  # Agora a reinicialização vai limpar e recriar TUDO
+            historico_ponto = DADOS_HISTORICOS_GLOBAIS.get(id_ponto)  # Tenta pegar de novo
+            if not historico_ponto:
+                print(f"ERRO: Falha ao reinicializar {id_ponto}");
+                continue
+
         novos_dados_nesta_rodada = []
         historico_atualizado = list(historico_ponto)
         for i in range(PASSOS_POR_ATUALIZACAO):
             try:
                 ultimo_timestamp_str = historico_atualizado[-1]['timestamp']
             except (IndexError, KeyError, ValueError) as e:
-                 print(f"ERRO no passo {i+1}: Falha ao ler último timestamp do {id_ponto}: {e}. Pulando o resto.");
-                 break
+                print(f"ERRO no passo {i + 1}: Falha ao ler último timestamp do {id_ponto}: {e}. Pulando o resto.");
+                break
             ultimo_timestamp = datetime.datetime.fromisoformat(ultimo_timestamp_str.replace('Z', '+00:00'))
             proximo_timestamp = ultimo_timestamp + FREQUENCIA_SIMULACAO
             novo_dado = simulador.gerar_novo_dado(proximo_timestamp, historico_atualizado)
             novos_dados_nesta_rodada.append(novo_dado)
             historico_atualizado.append(novo_dado)
             total_novos_pontos_gerados += 1
+
         DADOS_HISTORICOS_GLOBAIS[id_ponto].extend(novos_dados_nesta_rodada)
         DADOS_HISTORICOS_GLOBAIS[id_ponto] = DADOS_HISTORICOS_GLOBAIS[id_ponto][-MAX_HISTORY_POINTS:]
         df_ponto = pd.DataFrame(DADOS_HISTORICOS_GLOBAIS[id_ponto]);
         df_ponto['id_ponto'] = id_ponto;
         dfs_de_todos_os_pontos.append(df_ponto)
+
     if not dfs_de_todos_os_pontos:
         print("AVISO: Nenhum DataFrame gerado.");
         colunas_finais = ['id_ponto', 'timestamp', 'chuva_mm', 'precipitacao_acumulada_mm', 'umidade_1m_perc',
                           'umidade_2m_perc', 'umidade_3m_perc'];
         return pd.DataFrame(columns=colunas_finais)
+
     df_final = pd.concat(dfs_de_todos_os_pontos, ignore_index=True);
     df_final['timestamp'] = pd.to_datetime(df_final['timestamp']);
     df_final = df_final.rename(columns={'pluviometria_mm': 'chuva_mm'})
@@ -304,6 +348,8 @@ def get_data():
         try:
             return get_dados_reais_zentra()
         except Exception as e:
-            print(f"CRÍTICO: Falha API: {e}"); return get_dados_simulados()
+            print(f"CRÍTICO: Falha API: {e}");
+            return get_dados_simulados()
     else:
         return get_dados_simulados()
+

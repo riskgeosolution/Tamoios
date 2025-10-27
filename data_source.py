@@ -1,4 +1,4 @@
-# data_source.py (CORRIGIDO - Lógica de Atraso, Fase, e KeyError)
+# data_source.py (CORRIGIDO - Base 1m para 30.0% e Saturações Individuais)
 
 import pandas as pd
 import numpy as np
@@ -46,20 +46,25 @@ RISE_S3_START = RISE_S2_END;
 RISE_S3_END = 95.0  # (Inicia em 72mm)
 
 FALL_START_ALL = 120.0
-FALL_END_1M = 95.0
-FALL_END_2M = 69.0
-FALL_END_3M = 0.0
+FALL_END_1M = 95.0  # (Mais rápido)
+FALL_END_2M = 69.0  # (Médio)
+FALL_END_3M = 0.0  # (Mais lento)
 
 # --- Constantes do Simulador (Geral) ---
-# (Mantidas da sua versão)
+# (Valores de Base e Saturação atualizados conforme sua solicitação)
 CONSTANTES_PADRAO = {
-    "UMIDADE_BASE_1M": 28.0, "UMIDADE_BASE_2M": 24.0, "UMIDADE_BASE_3M": 22.0,
-    "UMIDADE_SATURACAO": 45.0,
+    "UMIDADE_BASE_1M": 30.0, "UMIDADE_BASE_2M": 36.0, "UMIDADE_BASE_3M": 39.0,  # NOVAS BASES (CORRIGIDO PARA 30/36/39)
+    "UMIDADE_SATURACAO_1M": 47.0,  # NOVA SATURAÇÃO 1M
+    "UMIDADE_SATURACAO_2M": 46.0,  # NOVA SATURAÇÃO 2M
+    "UMIDADE_SATURACAO_3M": 49.0,  # NOVA SATURAÇÃO 3M
     "LIMITE_CHUVA_24H": 85.0,
     "LIMITE_CHUVA_72H": 200.0,
 }
+
 PERFIL_PONTO_BASE = CONSTANTES_PADRAO.copy();
-PERFIL_PONTO_BASE["UMIDADE_BASE_1M"] = 25.0
+# --- CORREÇÃO: Removendo a sobrescrita que causava o 25% ---
+# PERFIL_PONTO_BASE["UMIDADE_BASE_1M"] = 25.0 # ESTA LINHA FOI REMOVIDA
+# --- FIM DA CORREÇÃO ---
 
 # (Restante das definições globais mantido)
 PONTOS_DE_ANALISE = {
@@ -81,9 +86,10 @@ PASSOS_POR_ATUALIZACAO = 6  # Mantido (simulação rápida)
 class SensorSimulator:
     def __init__(self, constantes):
         self.c = constantes
+        # Lendo os novos valores de base
         self.umidade_1m = self.c.get('UMIDADE_BASE_1M', CONSTANTES_PADRAO['UMIDADE_BASE_1M']);
         self.umidade_2m = self.c.get('UMIDADE_BASE_2M', CONSTANTES_PADRAO['UMIDADE_BASE_2M']);
-        self.umidade_3m = self.c.get('UMIDADE_BASE_3M', CONSTANTES_PADRAO['UMIDADE_BASE_3M'])
+        self.umidade_3m = self.c.get('UMIDADE_BASE_3M', CONSTANTES_PADRAO['UMIDADE_BASE_3M']);
         self.rain_script = []
         self.simulation_cycle_index = 0
         self.fase_chuva = 'subindo'  # Mantido
@@ -141,26 +147,27 @@ class SensorSimulator:
         total_chuva_72h = round(total_chuva_72h, 2)
         total_chuva_72h = max(0.0, min(total_chuva_72h, FALL_START_ALL))
 
-        # 2. Definir Bases e Saturação (da sua versão)
+        # 2. Definir Bases e Saturação (Lendo novas chaves)
         base_1m = self.c.get('UMIDADE_BASE_1M', CONSTANTES_PADRAO['UMIDADE_BASE_1M'])
         base_2m = self.c.get('UMIDADE_BASE_2M', CONSTANTES_PADRAO['UMIDADE_BASE_2M'])
         base_3m = self.c.get('UMIDADE_BASE_3M', CONSTANTES_PADRAO['UMIDADE_BASE_3M'])
-        saturacao = self.c.get('UMIDADE_SATURACAO', CONSTANTES_PADRAO['UMIDADE_SATURACAO'])
+
+        # Lendo as saturações individuais (NOVAS CHAVES)
+        saturacao_1m = self.c.get('UMIDADE_SATURACAO_1M', CONSTANTES_PADRAO['UMIDADE_SATURACAO_1M'])
+        saturacao_2m = self.c.get('UMIDADE_SATURACAO_2M', CONSTANTES_PADRAO['UMIDADE_SATURACAO_2M'])
+        saturacao_3m = self.c.get('UMIDADE_SATURACAO_3M', CONSTANTES_PADRAO['UMIDADE_SATURACAO_3M'])
 
         # 3. Determinar a Fase (Subindo ou Descendo) - LÓGICA REFINADA (Mantida)
-        # Se a chuva atual for maior que o pico registrado (com tolerância), estamos 'subindo'
         if total_chuva_72h > self.pico_chuva_ciclo - 0.1:
             self.fase_chuva = 'subindo'
             self.pico_chuva_ciclo = max(self.pico_chuva_ciclo, total_chuva_72h)
-        # Se a chuva atual for significativamente menor que o pico, estamos 'descendo'
         elif total_chuva_72h < self.pico_chuva_ciclo - 0.5:
             self.fase_chuva = 'descendo'
-        # Se a chuva for muito baixa (perto de 0), resetamos o pico e forçamos 'subindo' para o próximo evento
         if total_chuva_72h < 5.0:
             self.pico_chuva_ciclo = total_chuva_72h
             self.fase_chuva = 'subindo'  # Garante que o 1m sempre reaja
 
-        # 4. APLICAR LÓGICA LINEAR (RESTAURANDO OS ATRASOS)
+        # 4. APLICAR LÓGICA LINEAR (Mantendo os Atrasos)
         umidade_1m_calc = base_1m  # Default
         umidade_2m_calc = base_2m
         umidade_3m_calc = base_3m
@@ -168,40 +175,40 @@ class SensorSimulator:
         if self.fase_chuva == 'subindo':
             # S1 (Sempre reage de 0.0)
             if total_chuva_72h <= RISE_S1_END:
-                umidade_1m_calc = np.interp(total_chuva_72h, [RISE_S1_START, RISE_S1_END], [base_1m, saturacao])
+                umidade_1m_calc = np.interp(total_chuva_72h, [RISE_S1_START, RISE_S1_END], [base_1m, saturacao_1m])
             else:
-                umidade_1m_calc = saturacao
+                umidade_1m_calc = saturacao_1m
 
             # S2 (Inicia após S1)
             if total_chuva_72h < RISE_S2_START:
                 umidade_2m_calc = base_2m
             elif total_chuva_72h <= RISE_S2_END:
-                umidade_2m_calc = np.interp(total_chuva_72h, [RISE_S2_START, RISE_S2_END], [base_2m, saturacao])
+                umidade_2m_calc = np.interp(total_chuva_72h, [RISE_S2_START, RISE_S2_END], [base_2m, saturacao_2m])
             else:
-                umidade_2m_calc = saturacao
+                umidade_2m_calc = saturacao_2m
 
             # S3 (Inicia após S2)
             if total_chuva_72h < RISE_S3_START:
                 umidade_3m_calc = base_3m
             elif total_chuva_72h <= RISE_S3_END:
-                umidade_3m_calc = np.interp(total_chuva_72h, [RISE_S3_START, RISE_S3_END], [base_3m, saturacao])
+                umidade_3m_calc = np.interp(total_chuva_72h, [RISE_S3_START, RISE_S3_END], [base_3m, saturacao_3m])
             else:
-                umidade_3m_calc = saturacao
+                umidade_3m_calc = saturacao_3m
 
         else:  # self.fase_chuva == 'descendo'
             # S1
             if total_chuva_72h >= FALL_END_1M:
-                umidade_1m_calc = np.interp(total_chuva_72h, [FALL_END_1M, FALL_START_ALL], [base_1m, saturacao])
+                umidade_1m_calc = np.interp(total_chuva_72h, [FALL_END_1M, FALL_START_ALL], [base_1m, saturacao_1m])
             else:
                 umidade_1m_calc = base_1m
             # S2
             if total_chuva_72h >= FALL_END_2M:
-                umidade_2m_calc = np.interp(total_chuva_72h, [FALL_END_2M, FALL_START_ALL], [base_2m, saturacao])
+                umidade_2m_calc = np.interp(total_chuva_72h, [FALL_END_2M, FALL_START_ALL], [base_2m, saturacao_2m])
             else:
                 umidade_2m_calc = base_2m
             # S3
             if total_chuva_72h >= FALL_END_3M:
-                umidade_3m_calc = np.interp(total_chuva_72h, [FALL_END_3M, FALL_START_ALL], [base_3m, saturacao])
+                umidade_3m_calc = np.interp(total_chuva_72h, [FALL_END_3M, FALL_START_ALL], [base_3m, saturacao_3m])
             else:
                 umidade_3m_calc = base_3m
 
@@ -210,10 +217,10 @@ class SensorSimulator:
         self.umidade_2m = umidade_2m_calc
         self.umidade_3m = umidade_3m_calc
 
-        # 5. Garantir Limites Finais (Clamp) - (Mantido)
-        self.umidade_1m = max(base_1m, min(self.umidade_1m, saturacao))
-        self.umidade_2m = max(base_2m, min(self.umidade_2m, saturacao))
-        self.umidade_3m = max(base_3m, min(self.umidade_3m, saturacao))
+        # 5. Garantir Limites Finais (Clamp) - (Usando saturações individuais)
+        self.umidade_1m = max(base_1m, min(self.umidade_1m, saturacao_1m))
+        self.umidade_2m = max(base_2m, min(self.umidade_2m, saturacao_2m))
+        self.umidade_3m = max(base_3m, min(self.umidade_3m, saturacao_3m))
 
     def gerar_novo_dado(self, timestamp_utc, history_data):
         # ... (código mantido idêntico) ...
@@ -232,6 +239,7 @@ class SensorSimulator:
                 novo_acumulado = chuva_mm_neste_passo
         else:
             novo_acumulado = chuva_mm_neste_passo
+        # Retornando valores sem as bases dinâmicas (como estava)
         return {"timestamp": ts_str, "pluviometria_mm": round(chuva_mm_neste_passo, 2),
                 "precipitacao_acumulada_mm": round(novo_acumulado, 2),
                 "umidade_1m_perc": round(self.umidade_1m, 2), "umidade_2m_perc": round(self.umidade_2m, 2),
@@ -352,4 +360,3 @@ def get_data():
             return get_dados_simulados()
     else:
         return get_dados_simulados()
-

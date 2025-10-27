@@ -121,14 +121,16 @@ def update_specific_dashboard(pathname, dados_json, selected_hours):
         return "Ponto não encontrado", "Erro: Ponto inválido.", None
     constantes_ponto = config.get('constantes', CONSTANTES_PADRAO)
 
-    # Lendo as chaves de base e saturação individuais (corrigido do KeyError anterior)
+    # --- CORREÇÃO DO KEYERROR: Usando as chaves base e saturação individuais ---
     base_1m = constantes_ponto.get('UMIDADE_BASE_1M', CONSTANTES_PADRAO['UMIDADE_BASE_1M'])
     base_2m = constantes_ponto.get('UMIDADE_BASE_2M', CONSTANTES_PADRAO['UMIDADE_BASE_2M'])
     base_3m = constantes_ponto.get('UMIDADE_BASE_3M', CONSTANTES_PADRAO['UMIDADE_BASE_3M'])
 
+    # Lendo saturações individuais (ou default, se não existirem no CONSTANTES_PADRAO - fallback)
     saturacao_1m = constantes_ponto.get('UMIDADE_SATURACAO_1M', CONSTANTES_PADRAO.get('UMIDADE_SATURACAO_1M', 45.0))
     saturacao_2m = constantes_ponto.get('UMIDADE_SATURACAO_2M', CONSTANTES_PADRAO.get('UMIDADE_SATURACAO_2M', 45.0))
     saturacao_3m = constantes_ponto.get('UMIDADE_SATURACAO_3M', CONSTANTES_PADRAO.get('UMIDADE_SATURACAO_3M', 45.0))
+    # --- FIM DA CORREÇÃO ---
 
     df_completo = pd.read_json(StringIO(dados_json), orient='split');
     df_completo['timestamp'] = pd.to_datetime(df_completo['timestamp'])

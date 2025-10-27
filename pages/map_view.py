@@ -1,4 +1,4 @@
-# map_view.py (CORRIGIDO - Cor do badge de Umidade Solo)
+# pages/map_view.py (CORRIGIDO - Agora usa a Base Dinâmica para os gauges)
 
 import dash
 from dash import html, dcc, callback, Input, Output
@@ -7,7 +7,7 @@ import dash_leaflet as dl
 import pandas as pd
 from io import StringIO
 import traceback
-import numpy as np  # Import numpy
+import numpy as np
 
 # Importa o app central e helpers
 from app import app
@@ -18,7 +18,7 @@ import processamento
 
 # --- Layout da Página do Mapa (Mantido) ---
 def get_layout():
-    # ... (código mantido) ...
+    # ... (código mantido idêntico) ...
     print("Executando map_view.get_layout() (Dois Cards Superiores)")
     try:
         layout = dbc.Container([
@@ -28,7 +28,7 @@ def get_layout():
                         id='mapa-principal', center=[-23.5951, -45.4438], zoom=13,
                         children=[
                             dl.TileLayer(),
-                            dl.LayerGroup(id='map-pins-layer'),
+                            dl.LayerGroup(id='map-pins-layer'),  # Camada para pinos padrão
                             dbc.Card([dbc.CardHeader("KM 74 & KM 81", className="text-center small py-1"),
                                       dbc.CardBody(id='map-summary-left-content', children=[dbc.Spinner(size="sm")])],
                                      className="map-summary-card map-summary-left"),
@@ -50,10 +50,10 @@ def get_layout():
             [html.H1("Erro Layout Mapa"), html.Pre(traceback.format_exc())])
 
 
-# Callback 1: Atualiza os Pinos no mapa (Pinos padrão) (Mantido)
+# --- Callback 1: Atualiza os Pinos no mapa (Mantido) ---
 @app.callback(Output('map-pins-layer', 'children'), Input('store-dados-sessao', 'data'))
 def update_map_pins(dados_json):
-    # ... (código mantido) ...
+    # ... (código mantido idêntico) ...
     if not dados_json: return dash.no_update
     try:
         df_completo = pd.read_json(StringIO(dados_json), orient='split');
@@ -90,14 +90,14 @@ def update_map_pins(dados_json):
     return pinos_do_mapa
 
 
-# --- Funções e Constantes para Callbacks 2a e 2b (Mantidas) ---
-# ... (código mantido) ...
+# --- Funções e Constantes (Mantidas) ---
 CHUVA_LIMITE_VERDE = 50.0;
 CHUVA_LIMITE_AMARELO = 69.0;
 CHUVA_LIMITE_LARANJA = 89.0
 
 
 def get_color_class_chuva(value):
+    # ... (código mantido idêntico) ...
     if pd.isna(value): return "bg-secondary";
     if value <= CHUVA_LIMITE_VERDE:
         return "bg-success";
@@ -112,49 +112,51 @@ def get_color_class_chuva(value):
 RISCO_MAP = {"LIVRE": 0, "ATENÇÃO": 1, "ALERTA": 2, "PARALIZAÇÃO": 3, "SEM DADOS": -1, "ERRO": -1}
 
 
-# --- Função auxiliar create_km_block (MODIFICADA - Cor do Badge Umidade) ---
+# --- INÍCIO DA ALTERAÇÃO: Função create_km_block ---
+# (Agora usa a base dinâmica vinda do df_ponto)
 def create_km_block(id_ponto, config, df_ponto):
     ultima_chuva_72h = 0.0;
     umidade_1m_atual = 0.0;
     umidade_2m_atual = 0.0;
     umidade_3m_atual = 0.0
 
-    # Ler base dinâmica (Mantido)
-    constantes_ponto = config.get('constantes', CONSTANTES_PADRAO)
-    base_1m = constantes_ponto.get('UMIDADE_BASE_1M', CONSTANTES_PADRAO['UMIDADE_BASE_1M'])
-    base_2m = constantes_ponto.get('UMIDADE_BASE_2M', CONSTANTES_PADRAO['UMIDADE_BASE_2M'])
-    base_3m = constantes_ponto.get('UMIDADE_BASE_3M', CONSTANTES_PADRAO['UMIDADE_BASE_3M'])
-    ultimo_dado = None
-    if not df_ponto.empty:
-        ultimo_dado = df_ponto.iloc[-1]
-        base_1m = ultimo_dado.get('base_1m', base_1m)
-        base_2m = ultimo_dado.get('base_2m', base_2m)
-        base_3m = ultimo_dado.get('base_3m', base_3m)
-        if pd.isna(base_1m): base_1m = constantes_ponto.get('UMIDADE_BASE_1M', CONSTANTES_PADRAO['UMIDADE_BASE_1M'])
-        if pd.isna(base_2m): base_2m = constantes_ponto.get('UMIDADE_BASE_2M', CONSTANTES_PADRAO['UMIDADE_BASE_2M'])
-        if pd.isna(base_3m): base_3m = constantes_ponto.get('UMIDADE_BASE_3M', CONSTANTES_PADRAO['UMIDADE_BASE_3M'])
+    # Define as bases estáticas (padrão)
+    base_1m = config.get('constantes', CONSTANTES_PADRAO).get('UMIDADE_BASE_1M', CONSTANTES_PADRAO['UMIDADE_BASE_1M'])
+    base_2m = config.get('constantes', CONSTANTES_PADRAO).get('UMIDADE_BASE_2M', CONSTANTES_PADRAO['UMIDADE_BASE_2M'])
+    base_3m = config.get('constantes', CONSTANTES_PADRAO).get('UMIDADE_BASE_3M', CONSTANTES_PADRAO['UMIDADE_BASE_3M'])
 
     status_chuva_txt, status_chuva_col = "SEM DADOS", "secondary"
-    status_umid_txt, status_umid_col_bootstrap, cor_umidade_class = "SEM DADOS", "secondary", "bg-secondary"  # Fallbacks
+    status_umid_txt, status_umid_col, cor_umidade_class = "SEM DADOS", "secondary", "bg-secondary"
 
     try:
-        if not df_ponto.empty and ultimo_dado is not None:
+        if not df_ponto.empty:
             df_chuva_72h = processamento.calcular_acumulado_72h(df_ponto)
             if not df_chuva_72h.empty:
                 chuva_val = df_chuva_72h.iloc[-1]['chuva_mm']
                 if not pd.isna(chuva_val):
                     ultima_chuva_72h = chuva_val
                     status_chuva_txt, status_chuva_col = processamento.definir_status_chuva(ultima_chuva_72h)
+            try:
+                ultimo_dado = df_ponto.iloc[-1]
 
-            umidade_1m_atual = ultimo_dado.get('umidade_1m_perc', base_1m);
-            umidade_2m_atual = ultimo_dado.get('umidade_2m_perc', base_2m);
-            umidade_3m_atual = ultimo_dado.get('umidade_3m_perc', base_3m)
-            if pd.isna(umidade_1m_atual): umidade_1m_atual = base_1m
-            if pd.isna(umidade_2m_atual): umidade_2m_atual = base_2m
-            if pd.isna(umidade_3m_atual): umidade_3m_atual = base_3m
+                # --- CORREÇÃO: Lê a Base Dinâmica do último dado ---
+                # (Se 'base_1m' não estiver no DF (ex: API real), usa a base estática como fallback)
+                base_1m = ultimo_dado.get('base_1m', base_1m)
+                base_2m = ultimo_dado.get('base_2m', base_2m)
+                base_3m = ultimo_dado.get('base_3m', base_3m)
 
-            # Chama processamento com as bases dinâmicas lidas
-            status_umid_txt, status_umid_col_bootstrap, cor_umidade_class = processamento.definir_status_umidade_hierarquico(
+                umidade_1m_atual = ultimo_dado.get('umidade_1m_perc', base_1m);
+                umidade_2m_atual = ultimo_dado.get('umidade_2m_perc', base_2m);
+                umidade_3m_atual = ultimo_dado.get('umidade_3m_perc', base_3m)
+                if pd.isna(umidade_1m_atual): umidade_1m_atual = base_1m
+                if pd.isna(umidade_2m_atual): umidade_2m_atual = base_2m
+                if pd.isna(umidade_3m_atual): umidade_3m_atual = base_3m
+            except IndexError:
+                pass
+
+            # Chama processamento para obter o STATUS (LIVRE, ATENÇÃO, etc.)
+            # AGORA PASSANDO A BASE DINÂMICA (lida do ultimo_dado)
+            status_umid_txt, status_umid_col, cor_umidade_class = processamento.definir_status_umidade_hierarquico(
                 umidade_1m_atual, umidade_2m_atual, umidade_3m_atual, base_1m, base_2m, base_3m
             )
     except Exception as e:
@@ -162,11 +164,13 @@ def create_km_block(id_ponto, config, df_ponto):
         ultima_chuva_72h = 0.0;
         status_chuva_txt = "ERRO";
         status_chuva_col = "danger"
-        status_umid_txt, _, cor_umidade_class = "ERRO", "danger", "bg-danger"  # Ajusta fallback em erro
+        status_umid_txt, status_umid_col, cor_umidade_class = "ERRO", "danger", "bg-danger"
 
     cor_chuva_class = get_color_class_chuva(ultima_chuva_72h)
     chuva_max_visual = 90.0
     chuva_percent = max(0, min(100, (ultima_chuva_72h / chuva_max_visual) * 100))
+
+    # --- Lógica do Gauge de Umidade (Mantida) ---
     umidade_percent_realista = 0
     risco_umidade = RISCO_MAP.get(status_umid_txt, -1)
     if risco_umidade == 0:
@@ -177,39 +181,49 @@ def create_km_block(id_ponto, config, df_ponto):
         umidade_percent_realista = 75
     elif risco_umidade == 3:
         umidade_percent_realista = 100
+    # --- FIM DA LÓGICA ---
 
     chuva_gauge = html.Div(  # Gauge Chuva
-        [html.Div(className=f"gauge-bar {cor_chuva_class}", style={'height': f'{chuva_percent}%'}),
-         html.Div([html.Span(f"{ultima_chuva_72h:.0f}"), html.Br(), html.Span("mm", style={'fontSize': '0.8em'})],
-                  className="gauge-label", style={'fontSize': '2.5em', 'lineHeight': '1.1'})],
-        className="gauge-vertical-container")
-    umidade_gauge = html.Div(  # Gauge Umidade Solo
+        [
+            html.Div(className=f"gauge-bar {cor_chuva_class}", style={'height': f'{chuva_percent}%'}),
+            html.Div(
+                [html.Span(f"{ultima_chuva_72h:.0f}"), html.Br(), html.Span("mm", style={'fontSize': '0.8em'})],
+                className="gauge-label", style={'fontSize': '2.5em', 'lineHeight': '1.1'}
+            )
+        ], className="gauge-vertical-container"
+    )
+    umidade_gauge = html.Div(  # Gauge Umidade
         [html.Div(className=f"gauge-bar {cor_umidade_class}", style={'height': f'{umidade_percent_realista}%'})],
-        className="gauge-vertical-container")
+        className="gauge-vertical-container"
+    )
     chuva_badge = dbc.Badge(status_chuva_txt, color=status_chuva_col, className="w-100 mt-1 small badge-black-text")
+    umidade_badge = dbc.Badge(status_umid_txt, color=status_umid_col, className="w-100 mt-1 small badge-black-text")
 
-    # --- INÍCIO DA ALTERAÇÃO ---
-    # Aplica a classe de background (bg-*) diretamente no className
-    # Remove a propriedade 'color' que estava causando o problema
-    umidade_badge = dbc.Badge(status_umid_txt, className=f"w-100 mt-1 small badge-black-text {cor_umidade_class}")
-    # --- FIM DA ALTERAÇÃO ---
-
+    # Envolve com Link (mantido)
     link_destino = f"/ponto/{id_ponto}"
     conteudo_bloco = html.Div([
         html.H6(config['nome'], className="text-center mb-1"),
         dbc.Row([
             dbc.Col([html.Div("Chuva (72h)", className="small text-center"), chuva_gauge, chuva_badge], width=6),
-            dbc.Col([html.Div("Umidade Solo", className="small text-center"), umidade_gauge, umidade_badge], width=6),
+            dbc.Col([html.Div("Umidade", className="small text-center"), umidade_gauge, umidade_badge], width=6),
         ], className="g-0"),
     ], className="km-summary-block")
-    return html.A(conteudo_bloco, href=link_destino, style={'textDecoration': 'none', 'color': 'inherit'})
+
+    return html.A(
+        conteudo_bloco,
+        href=link_destino,
+        style={'textDecoration': 'none', 'color': 'inherit'}
+    )
+
+
+# --- FIM DA ALTERAÇÃO ---
 
 
 # --- Callbacks 2a e 2b (Callbacks que USAM create_km_block) ---
 # (Mantidos idênticos)
-# ... (código mantido) ...
 @app.callback(Output('map-summary-left-content', 'children'), Input('store-dados-sessao', 'data'))
 def update_summary_left(dados_json):
+    # ... (código com try/except mantido) ...
     if not dados_json: return dbc.Spinner(size="sm")
     try:
         df_completo = pd.read_json(StringIO(dados_json), orient='split');
@@ -231,6 +245,7 @@ def update_summary_left(dados_json):
 
 @app.callback(Output('map-summary-right-content', 'children'), Input('store-dados-sessao', 'data'))
 def update_summary_right(dados_json):
+    # ... (código com try/except mantido) ...
     if not dados_json: return dbc.Spinner(size="sm")
     try:
         df_completo = pd.read_json(StringIO(dados_json), orient='split');
@@ -248,3 +263,4 @@ def update_summary_right(dados_json):
     except Exception as e:
         print(f"ERRO GERAL em update_summary_right: {e}")
         return dbc.Alert(f"Erro ao carregar dados (R): {e}", color="danger", className="m-2 small")
+# --- FIM DOS CALLBACKS ---
